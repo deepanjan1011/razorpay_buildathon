@@ -932,3 +932,82 @@ than *does it sound risky*.
 
 **And it took a live run to find.** 160 tests were green. The gate is a real
 sheet going in and a valid feed coming out — not a suite agreeing with itself.
+
+---
+
+## 2026-08-22 — The ingest endpoint created a concurrency hole in "exactly-once"
+
+**Hit while writing the endpoint tests**, not by a failing assertion — two tests
+went non-deterministic, and the reason was worse than flaky tests.
+
+`runJob` selected batches with `status <> 'done'` and worked them. That is
+exactly-once against **sequential** resume: a completed batch is never re-run.
+It says nothing about **two runners at once**. Both would see the same batch as
+pending, both would call the provider, and both would write. The data stayed
+consistent — the write transaction guarantees that — but the second API call was
+already spent, against a five-per-minute budget.
+
+**I created the exposure in the same session.** `POST /api/ingest` is idempotent
+by job id and starts the run in the background, so a double-click, a refresh or
+a retried request starts a second runner on the same job. The guarantee was
+written before the thing that could violate it existed.
+
+**Fix: claim a batch with a conditional UPDATE.**
+
+```sql
+update ingest_batch set status = 'running', claimed_at = now()
+ where job_id = $1 and batch_index = $2 and status in ('pending','failed')
+returning batch_index
+```
+
+Postgres serialises the row write, so of N concurrent runners exactly one gets a
+row back and the rest move on. No lock table, no advisory lock, no queue —
+about fifteen lines, most of them the stale-claim clause.
+
+**`claimed_at` exists for the crash case.** A runner that dies mid-batch would
+otherwise park it in `running` forever, unreclaimable. A claim older than
+fifteen minutes is treated as abandoned — comfortably longer than a 100-row call
+plus a retry waiting out a rate-limit window.
+
+**The check constraint immediately caught a second bug.** Claiming a previously
+FAILED batch flipped `status` to `running` while leaving the earlier attempt's
+`reason_code` attached, violating `only_failed_has_reason`. That constraint was
+written for schema tidiness and turned out to be defending the audit trail: a
+running batch carrying a stale failure reason is a record asserting a live
+failure that is no longer true — the false-reason-code problem from earlier in
+this file, arriving by a different route. Claiming now clears both reason
+columns.
+
+**Tested with three genuinely concurrent runners** against real Postgres,
+asserting every row is extracted exactly once; plus a stranded-claim test and a
+fresh-claim test.
+
+**The general point.** "Exactly-once" was true of the code as written and became
+false when a new caller appeared. A concurrency guarantee is a property of the
+whole system, not of the function that implements it, and adding an entry point
+is enough to invalidate one. Worth re-checking the same way when the MCP server
+lands in Phase 4 and a third caller can start work.
+
+---
+
+## 2026-08-22 — Live: upload → job → poll → published feed
+
+Full stack against real Neon and real Gemini, no fakes:
+
+```
+migrations: [ '002_job_sheet.sql', '003_batch_claim.sql' ]
+POST returned in 1026 ms | job job_e1d17af855680546 | resumed false | status running
+  poll: running 0/4 → complete 4/4
+final: complete 4/4 | served by gemini-3.5-flash
+feed published: 3 products, 4 variants
+```
+
+The POST returns in **one second** on a job that takes twelve — which is the
+whole point of the job layer, and the thing a synchronous handler could not do.
+
+**One design point confirmed by building it.** `assembleProducts` originally
+took the parsed sheet as an argument, so a job could survive a restart in the
+database and still be impossible to finish — the headers it needs to locate the
+price and stock columns lived only in memory. Migration `002` stores the sheet
+name and headers on the job. Resumability that depends on a process staying
+alive is not resumability.

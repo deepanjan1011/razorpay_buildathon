@@ -224,6 +224,11 @@ function parseSheet(ws: ExcelJS.Worksheet): ParsedSheet {
 export async function parseWorkbook(path: string): Promise<ParsedSheet[]> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(path);
+  return parseSheets(wb);
+}
+
+/** Split out so an upload can be parsed from bytes without touching disk. */
+export function parseSheets(wb: ExcelJS.Workbook): ParsedSheet[] {
   return wb.worksheets.map(parseSheet);
 }
 

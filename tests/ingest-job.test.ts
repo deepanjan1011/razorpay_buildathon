@@ -22,6 +22,7 @@ import { parseWorkbook } from "../lib/ingest/parse.ts";
 import type { ParsedSheet } from "../lib/ingest/parse.ts";
 import {
   assembleProducts,
+  CLAIM_TIMEOUT_MS,
   createJob,
   getProgress,
   jobId,
@@ -232,12 +233,78 @@ describe("exactly-once at batch granularity", () => {
     assert.equal(final.status, "complete");
   });
 
+  test("two concurrent runners never work the same batch", async () => {
+    // This gap was created by POST /api/ingest: the endpoint is idempotent by
+    // job id and starts the run in the background, so a double-click starts a
+    // SECOND runner on the same job. Before batch claiming, both would see the
+    // same pending batches, both would call the provider, and both would write
+    // — consistent data, but every API call spent twice against a five-a-minute
+    // budget.
+    const id = await create();
+
+    const seen: number[][] = [];
+    const slowExtract: ExtractFn = async (batch) => {
+      seen.push(batch.map((r) => r.source_row));
+      // Wide enough for the other runner to reach the same batch if it could.
+      await new Promise((r) => setTimeout(r, 40));
+      return fakeResult(batch);
+    };
+
+    await Promise.all([
+      runJob(sql, id, slowExtract),
+      runJob(sql, id, slowExtract),
+      runJob(sql, id, slowExtract),
+    ]);
+
+    const rows = seen.flat();
+    assert.equal(new Set(rows).size, rows.length, "a row was extracted twice");
+    assert.equal(rows.length, 14, "every row extracted exactly once");
+
+    const progress = await getProgress(sql, id);
+    assert.equal(progress.rows_extracted, 14);
+    assert.equal(progress.batches_done, 3);
+  });
+
+  test("a batch abandoned by a crashed runner is reclaimable", async () => {
+    const id = await create();
+    // Simulate a runner that claimed a batch and died: status running, claim
+    // older than the timeout. Without the staleness clause this batch would be
+    // stranded forever.
+    await sql.query(
+      `update ingest_batch
+          set status = 'running',
+              claimed_at = now() - ($2 || ' milliseconds')::interval
+        where job_id = $1 and batch_index = 0`,
+      [id, String(CLAIM_TIMEOUT_MS + 60_000)],
+    );
+
+    await runJob(sql, id, countingExtractor().extract);
+    const progress = await getProgress(sql, id);
+    assert.equal(progress.rows_extracted, 14, "the abandoned batch was picked up");
+    assert.equal(progress.status, "complete");
+  });
+
+  test("a batch claimed just now is left alone", async () => {
+    const id = await create();
+    await sql.query(
+      `update ingest_batch set status = 'running', claimed_at = now()
+        where job_id = $1 and batch_index = 0`,
+      [id],
+    );
+
+    const { extract, rowsSeen } = countingExtractor();
+    await runJob(sql, id, extract);
+    // Batches 1 and 2 ran; batch 0 belongs to the other runner.
+    assert.equal(rowsSeen().length, 9);
+    assert.equal((await getProgress(sql, id)).rows_extracted, 9);
+  });
+
   test("product ids are identical across a resume", async () => {
     const idA = await create();
     const first = countingExtractor((call) => (call === 2 ? "throw" : "ok"));
     await runJob(sql, idA, first.extract);
     await runJob(sql, idA, countingExtractor().extract);
-    const resumed = await assembleProducts(sql, idA, sheet);
+    const resumed = await assembleProducts(sql, idA);
 
     // A run that never failed, for comparison.
     const clean = await connectEphemeral();
@@ -249,7 +316,7 @@ describe("exactly-once at batch granularity", () => {
       batchSize: 5,
     });
     await runJob(clean, idB, countingExtractor().extract);
-    const straight = await assembleProducts(clean, idB, sheet);
+    const straight = await assembleProducts(clean, idB);
 
     // Variant.id is the ACP checkout items[].id. A resume must not shift it.
     assert.deepEqual(
@@ -280,7 +347,7 @@ describe("failures are visible, not silent", () => {
     const { extract } = countingExtractor((call) => (call === 2 ? "throw" : "ok"));
     await runJob(sql, id, extract);
 
-    const products = await assembleProducts(sql, id, sheet);
+    const products = await assembleProducts(sql, id);
     const variants = products.flatMap((p) => p.variants);
 
     // Every sheet row is still represented.
