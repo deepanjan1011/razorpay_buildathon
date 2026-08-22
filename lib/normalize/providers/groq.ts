@@ -15,6 +15,7 @@
  * one POST is a dependency to keep current for nothing.
  */
 import { EXTRACTION_SCHEMA } from "../llm-schema.ts";
+import { fetchRetrying } from "./retry.ts";
 import { ProviderError, requireKey } from "./types.ts";
 import type { Provider, ProviderResponse } from "./types.ts";
 
@@ -30,7 +31,7 @@ export function groqProvider(model: string = GROQ_MODEL): Provider {
     conformance: "constrained",
 
     async complete(system, user): Promise<ProviderResponse> {
-      const response = await fetch(ENDPOINT, {
+      const response = await fetchRetrying("groq", ENDPOINT, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${requireKey("GROQ_API_KEY")}`,
@@ -52,9 +53,15 @@ export function groqProvider(model: string = GROQ_MODEL): Provider {
             },
           },
         }),
+      }, {
+        onRetry: (i) =>
+          console.warn(
+            `  groq retry ${i.attempt} (${i.status ?? "network"}), ` +
+              `waiting ${Math.round(i.waitMs / 100) / 10}s [${i.source}]`,
+          ),
       });
 
-      const body = await response.text();
+      const body = response.body;
       if (!response.ok) throw new ProviderError("groq", response.status, body);
 
       const json = JSON.parse(body) as {

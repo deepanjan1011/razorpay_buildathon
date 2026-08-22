@@ -566,18 +566,25 @@ Stronger guarantee versus better semantics. The fixtures already discriminate.
 ## 2026-08-22 — Provider bake-off: real numbers
 
 `npm run bakeoff`. Same prompt, same canonical schema, same rows, all providers.
-20 hand-labelled fields across 10 rows chosen to discriminate rather than to
-flatter: the five merchant-shorthand rows from `messy-05` and the five
-Tamil/transliterated rows from `messy-07`.
 
-| field | gpt-oss-120b | qwen3.6-27b | gemini-3.5-flash |
+**Sample size: n = 10 rows, 40 field observations per provider per run, 2 runs.**
+Every figure below carries that n. At this size "100%" means *no failures
+observed in 40 observations*, which is not the same claim as "does not fail" —
+the 95% confidence interval on 40/40 still reaches down to roughly 91%. Do not
+let a bare percentage from this table travel without its n attached.
+
+The rows were chosen to discriminate rather than to flatter: the five
+merchant-shorthand rows from `messy-05` and the five Tamil/transliterated rows
+from `messy-07`.
+
+| field (n=10 rows) | gpt-oss-120b | qwen3.6-27b | gemini-3.5-flash |
 |---|---|---|---|
 | title | 9/10 → 10/10 | — | **10/10** |
 | category | 9/10 → 9/10 | — | **10/10** |
 | title_inferred | 9/10 → 10/10 | — | **10/10** |
 | colour | 5/5 | — | **5/5** |
 | size | 5/5 | — | **5/5** |
-| **overall** | **93% → 98%** | **0%** | **100% → 100%** |
+| **overall (n=40 obs)** | **37/40, 39/40 (93%, 98%)** | **0/40 (0%)** | **40/40, 40/40 (100%, 100%)** |
 | latency (10 rows, 2 calls) | ~7.0s | — | ~16.3s |
 | conformance | constrained | constrained | best-effort |
 | schema violations | none | n/a | **none** |
@@ -597,8 +604,9 @@ with `title_inferred: true`. A vetti is a dhoti — everyday Tamil apparel. Unde
 our flag tiers that reading queues the product for review and, with
 `title_inferred`, withholds it from the feed entirely.
 
-**Gemini scored 100% in both runs**, including every Tamil row, and produced no
-schema violation despite having no decoding guarantee.
+**Gemini scored 40/40 in both runs**, including every Tamil row, and produced no
+schema violation despite having no decoding guarantee. At n=40 that is "no
+failures observed", not a demonstrated property.
 
 ### Decision: Gemini
 
@@ -607,8 +615,9 @@ better property than best-effort." That rule is right, and it does not apply
 here, because this is not close on the axis that matters:
 
 1. **The guarantee protected against a failure that never occurred.** Zero
-   schema violations from Gemini across every run. The property is real; its
-   value at this sample size was zero.
+   schema violations from Gemini across every run — though at n=40 that is
+   weak evidence, and it is evidence of absence only at this scale. The
+   property is real; its observed value here was zero.
 2. **The semantic gap did occur, repeatedly and in the same place.** And that
    place is the transliterated-Tamil row — the exact demographic this project
    targets. "Half the Tamil catalogue is withheld or miscategorised" is not a
@@ -629,10 +638,12 @@ seam makes it a one-line change and a re-run.
 
 ### Honest limits of this table
 
-- **n = 10 rows, synthetic.** These are our own fixtures, written by us. They
-  measure which provider reads *our* mess cases better. They are **not** the
-  §5 accuracy number, which needs a real sheet and 50 hand-labelled products.
-  `NORMALIZATION-EVAL.md` stays empty.
+- **n = 10 rows / 40 field observations, synthetic.** These are our own
+  fixtures, written by us. They measure which provider reads *our* mess cases
+  better. They are **not** the §5 accuracy number, which needs a real sheet and
+  50 hand-labelled products. `NORMALIZATION-EVAL.md` stays empty. Any figure
+  quoted from this table must carry its n — a bare "100%" implies a property
+  that 40 observations cannot establish.
 - **One label was wrong on the first run.** Gemini returned `"Veshti"` for
   வேட்டி and was scored a miss, because the label only accepted
   `vetti|dhoti`. Veshti is the standard Tamil Nadu romanisation — the label was
@@ -647,3 +658,71 @@ seam makes it a one-line change and a re-run.
   catalogue. The prompt now states explicitly that expanding shorthand and
   translating are not inferring. Both providers were then measured on the fixed
   prompt.
+
+
+---
+
+## 2026-08-22 — Normalization latency at catalogue scale, and the 5 RPM wall
+
+**Question.** `~16s` was observed on a 5-row call. Per row or per call? The
+upload flow cannot be designed without knowing: per row makes a 500-row sheet an
+overnight job needing a queue; per call makes it a handful of requests the UI
+can wait on.
+
+**Measured** (`npm run latency`, gemini-3.5-flash):
+
+| batch | ms | ms/row | output tokens |
+|---|---|---|---|
+| 10 | 10,959 | 1,096 | 1,724 |
+| 25 | 26,031 | 1,041 | 4,406 |
+| 50 | 30,590 | 612 | 7,858 |
+| 100 | 50,673 | 507 | 8,411 |
+
+10 → 100 rows is 10× the rows and 3.6–4.6× the time, **factor 0.36–0.46**. Cost
+is dominated by the CALL, not the row. So batch aggressively — 507ms/row at 100
+against 1,096ms/row at 10, better than 2×.
+
+**Then the real wall.** Four parallel calls failed 200 of 500 rows with 429.
+Dropping to concurrency 2 failed *all 500*. The cause was not concurrency
+itself:
+
+> `Quota exceeded ... limit: 5, model: gemini-3.5-flash`
+> `GenerateRequestsPerMinutePerProjectPerModel-FreeTier`, quotaValue `5`
+
+**Five requests per minute.** And critically, Gemini sends **no `Retry-After`
+header** — the delay lives in the response body as
+`google.rpc.RetryInfo { retryDelay: "19s" }`. Our backoff only read headers, so
+it fell back to exponential backoff capped at four seconds, exhausted four
+attempts inside a single sixty-second window, and failed everything. It looked
+like a concurrency problem and was a *don't-read-the-error* problem.
+
+**Fixes.** `providers/retry.ts` now parses `RetryInfo` from the body (and the
+prose message as a last resort), and backoff can wait up to 70s — a rate-limit
+window has to be outlastable. `DEFAULT_CONCURRENCY` is **1**: under an RPM cap
+the scarce resource is requests, so parallelism only converts a queue into a
+burst of 429s that the retry then serialises anyway, having wasted the attempts.
+
+**Result: 300/300 rows, zero failures**, 200.9s wall clock — ~670ms/row
+including rate-limit waiting, 1.5 rows/s.
+
+### What this means for the upload flow
+
+**The upload cannot be synchronous.** Extrapolating at 1.5 rows/s:
+
+| catalogue | wall clock |
+|---|---|
+| 100 rows | ~1 min |
+| 500 rows | ~5.5 min |
+| 2,000 rows | ~22 min |
+
+No merchant holds a browser tab open for five minutes, and a dropped connection
+must not lose the work. The ingest needs a job record, progress the UI can poll,
+and resumability at batch granularity. `extractCatalogue` already reports
+per-batch progress and returns failed rows rather than throwing, which is the
+half of that shape which belongs in the library; the job record is Phase 1
+persistence work.
+
+**This is a free-tier constraint, not a product constraint.** A paid tier lifts
+the RPM cap and concurrency becomes useful again — at which point the binding
+limit returns to the ~507ms/row call cost, and 500 rows is under a minute.
+Re-measure rather than assume; `DEFAULT_CONCURRENCY` is one line.

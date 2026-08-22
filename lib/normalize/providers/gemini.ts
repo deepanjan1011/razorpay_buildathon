@@ -15,6 +15,7 @@
  * three differences this schema hits.
  */
 import { EXTRACTION_SCHEMA, toGeminiSchema } from "../llm-schema.ts";
+import { fetchRetrying } from "./retry.ts";
 import { ProviderError, requireKey } from "./types.ts";
 import type { Provider, ProviderResponse } from "./types.ts";
 
@@ -30,7 +31,7 @@ export function geminiProvider(model: string = GEMINI_MODEL): Provider {
       const url =
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-      const response = await fetch(url, {
+      const response = await fetchRetrying("gemini", url, {
         method: "POST",
         headers: {
           "x-goog-api-key": requireKey("GEMINI_API_KEY"),
@@ -45,9 +46,15 @@ export function geminiProvider(model: string = GEMINI_MODEL): Provider {
             responseSchema: toGeminiSchema(EXTRACTION_SCHEMA),
           },
         }),
+      }, {
+        onRetry: (i) =>
+          console.warn(
+            `  gemini retry ${i.attempt} (${i.status ?? "network"}), ` +
+              `waiting ${Math.round(i.waitMs / 100) / 10}s [${i.source}]`,
+          ),
       });
 
-      const body = await response.text();
+      const body = response.body;
       if (!response.ok) throw new ProviderError("gemini", response.status, body);
 
       const json = JSON.parse(body) as {

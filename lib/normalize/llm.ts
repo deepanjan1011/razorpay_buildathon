@@ -26,8 +26,11 @@ export type { Provider };
  * The provider the pipeline uses by default.
  *
  * Gemini, set from the bake-off in OBSTACLES.md rather than by preference:
- * 100% on the discriminating rows across repeated runs, against 93-98% for the
- * strongest Groq model, whose every miss was the transliterated-Tamil row.
+ * 40/40 field observations on the discriminating rows in each of two runs,
+ * against 37/40 and 39/40 for the strongest Groq model, whose every miss was
+ * the transliterated-Tamil row. That n is small — 40 observations is "no
+ * failures observed", not a demonstrated property — and the decision is
+ * recorded with reversal conditions for exactly that reason.
  *
  * That is not the tie the constrained-decoding advantage was meant to settle.
  * The guarantee protects against a failure that did not occur in any run; the

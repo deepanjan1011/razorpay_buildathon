@@ -188,6 +188,63 @@ describe("§1.1 mapping rules", () => {
     assert.equal(acp.description?.plain, "Classic canvas shoe.\nBrand: Lakshmi");
   });
 
+  test("attributes NEVER reach variant_options, whatever they are named", () => {
+    // `options` and `attributes` now share a {name,value} shape on the wire,
+    // because that is the only map shape either provider can constrain. A
+    // shared SHAPE must not quietly become a shared DESTINATION: an agent may
+    // render variant_options as a picker, so "Gender: Womens" landing there
+    // offers the buyer a choice that does not exist.
+    const attributes = {
+      material: "canvas",
+      gender: "unisex",
+      fit: "regular",
+      occasion: "casual",
+      // Deliberately named like real option dimensions. Nothing about the key
+      // should be able to promote an attribute into an option.
+      Colour: "not-an-option",
+      Size: "not-an-option",
+    };
+
+    const { product: acp } = projectProduct(
+      product({ variants: [variant({ options: { Size: "9" }, attributes })] }),
+    );
+    assert.ok(acp);
+    const [v] = acp.variants;
+    assert.ok(v);
+
+    // Exactly the one real option, and nothing else.
+    assert.deepEqual(v.variant_options, [{ name: "Size", value: "9" }]);
+    assert.equal(v.variant_options?.length, 1);
+
+    // No attribute VALUE appears anywhere in variant_options, even when its key
+    // collides with a genuine dimension name.
+    const optionsJson = JSON.stringify(v.variant_options);
+    assert.ok(!optionsJson.includes("not-an-option"));
+    for (const value of ["canvas", "unisex", "regular", "casual"]) {
+      assert.ok(!optionsJson.includes(value), `${value} leaked into variant_options`);
+    }
+
+    // They are not dropped either — they belong in prose.
+    const prose = v.description?.plain ?? "";
+    for (const value of ["canvas", "unisex", "regular", "casual"]) {
+      assert.ok(prose.includes(value), `${value} lost entirely`);
+    }
+  });
+
+  test("a variant with only attributes emits no variant_options at all", () => {
+    const { product: acp } = projectProduct(
+      product({
+        variants: [variant({ options: {}, attributes: { material: "silk", gender: "womens" } })],
+      }),
+    );
+    assert.ok(acp);
+    const [v] = acp.variants;
+    assert.ok(v);
+    // Absent, not an empty array — an empty picker is still a picker.
+    assert.ok(!("variant_options" in v));
+    assert.equal(v.description?.plain, "Material: silk\nGender: womens");
+  });
+
   test("non-distinguishing attributes go to prose, NOT to variant_options", () => {
     const { product: acp } = projectProduct(
       product({
