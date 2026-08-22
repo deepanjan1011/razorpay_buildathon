@@ -11,6 +11,8 @@
  *    inventory counts and merchant ids have nowhere to go. They stay in
  *    Postgres, where they power the review queue, the audit trail and the eval.
  */
+import { isBlocking } from "../normalize/flags.ts";
+import type { NormalizationFlag } from "../normalize/flags.ts";
 import type { Product, Variant } from "../normalize/schema.ts";
 import {
   MERCHANT_TAXONOMY_NAME,
@@ -34,6 +36,17 @@ export type Feed = {
   /** Ids withheld from the feed, with the reason. Never silently dropped. */
   withheld: Array<{ id: string; kind: "product" | "variant"; reason: string }>;
 };
+
+/**
+ * The reason a record was withheld names only the flags that actually caused
+ * it. Advisory flags ride along on the record but never withhold anything, so
+ * listing them here would make the audit trail state a false cause —
+ * "withheld: CURRENCY_ASSUMED" is not why anything was withheld. CLAUDE.md
+ * invariant 3 wants a reason code that is true.
+ */
+function blockingReason(flags: readonly NormalizationFlag[]): string {
+  return flags.filter(isBlocking).join(",") || "needs_review";
+}
 
 /** ACP `Price.currency` is `^[A-Z]{3}$`; the internal model is INR-only. */
 function price(money: { amount_minor: number; currency: "INR" }): ACPPrice {
@@ -153,7 +166,7 @@ export function projectProduct(
         {
           id: product.id,
           kind: "product",
-          reason: product.normalization.flags.join(",") || "needs_review",
+          reason: blockingReason(product.normalization.flags),
         },
       ],
     };
@@ -165,7 +178,7 @@ export function projectProduct(
       withheld.push({
         id: variant.id,
         kind: "variant",
-        reason: variant.normalization.flags.join(",") || "needs_review",
+        reason: blockingReason(variant.normalization.flags),
       });
       continue;
     }

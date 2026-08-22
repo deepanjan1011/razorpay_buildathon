@@ -91,6 +91,28 @@ A `Product` whose every `Variant` is flagged is itself withheld. A `Product`
 with a mix serves only its clean variants — ACP requires `variants` to be
 present, so a product cannot ship empty.
 
+### Blocking vs advisory flags
+
+`needs_review` is set by **blocking** flags only. Flags divide by what they
+assert:
+
+| | Flags | Meaning |
+|---|---|---|
+| **Blocking** | `MISSING_REQUIRED_FIELD`, `PRICE_AMBIGUOUS`, `PRICE_OUT_OF_BAND`, `CATEGORY_UNMAPPED`, `TITLE_INFERRED` | *We are not sure this is right.* Withheld from the feed, sent to review. |
+| **Advisory** | `CURRENCY_ASSUMED`, `VARIANTS_SPLIT`, `MULTILINGUAL_SOURCE` | *Something we did, or something about the source.* Carried on the record and shown in review; does not gate publication. |
+
+This is not a softening. Treating every flag as blocking empties the feed —
+`CURRENCY_ASSUMED` fires on any plain-number price, which is nearly every row of
+nearly every real sheet — and a review queue holding every product is one the
+merchant rubber-stamps, which destroys the check it exists to provide. The
+reasoning per flag is in `lib/normalize/flags.ts`; the failure that forced it is
+in `OBSTACLES.md`.
+
+A withheld record's logged reason names **blocking flags only**. A record held
+for `CATEGORY_UNMAPPED` must not be logged as
+`CURRENCY_ASSUMED,CATEGORY_UNMAPPED` — that reason code names a non-cause, and
+`CLAUDE.md` invariant 3 asks for one that is true.
+
 ### 1.1 Outbound projection to the ACP feed
 
 The internal model is a superset, so **the outbound projection is lossy by

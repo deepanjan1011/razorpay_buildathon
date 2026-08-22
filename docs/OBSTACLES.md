@@ -407,3 +407,59 @@ dependency. Flagged here so that move is a known step rather than a surprise.
 a namespace rather than a constructor. Applied ajv's own documented ESM
 workaround. Recorded only so the next person does not think the cast is
 accidental.
+
+---
+
+## 2026-08-22 — "Any flag means needs_review" was wrong, and emptied the feed
+
+**Hit.** Three tests failed the moment the normalizer ran end to end against a
+real fixture. Root cause was one rule I had written into `normalize.ts` with a
+confident comment — *"Any flag at all means a human looks at it. There is
+deliberately no minor flag tier."*
+
+`CURRENCY_ASSUMED` fires on any price written as a plain number. That is nearly
+every row of nearly every small-merchant sheet. So under that rule every product
+was `needs_review`, and **the feed was permanently empty**. The gate could never
+be met, by construction.
+
+**Why the rule was wrong, not just inconvenient.** It sounded like the cautious
+choice and was the opposite, in two ways:
+
+1. `CURRENCY_ASSUMED` is not a statement of doubt. This system is INR-only
+   (`CLAUDE.md` invariant 6). There is no other currency the number could be.
+   The flag records an assumption for the audit trail; it does not mean we are
+   unsure what the merchant meant.
+2. A review queue containing *every* product is a queue the merchant
+   rubber-stamps. That destroys the check the queue exists to provide. Caution
+   aimed at everything stops being caution.
+
+**Fix.** Flags now divide by what they actually assert, in `flags.ts`:
+
+- **Blocking** — *we are not sure this is right.* `MISSING_REQUIRED_FIELD`,
+  `PRICE_AMBIGUOUS`, `PRICE_OUT_OF_BAND`, `CATEGORY_UNMAPPED`,
+  `TITLE_INFERRED`. These withhold the record and send it to review.
+- **Advisory** — *here is something we did, or something about the source.*
+  `CURRENCY_ASSUMED`, `VARIANTS_SPLIT`, `MULTILINGUAL_SOURCE`. Carried on the
+  record, shown in review, but they do not gate publication.
+
+Each advisory case has its own reason, spelled out in `flags.ts` rather than
+left implicit. `VARIANTS_SPLIT`: the splitting is deterministic and `splitList`
+already refuses the case that could fabricate SKUs. `MULTILINGUAL_SOURCE`:
+whether a Tamil reading is trustworthy is carried by the model's own
+`confidence`, which is already thresholded — blocking on script alone would put
+every row of a Tamil-speaking merchant's catalogue into review on the basis of
+the alphabet.
+
+**Second, quieter bug found by the same fix.** The projection built its withheld
+`reason` by joining *all* flags, so a record held back for `CATEGORY_UNMAPPED`
+was logged as `CURRENCY_ASSUMED,CATEGORY_UNMAPPED`. That reason code is false —
+`CURRENCY_ASSUMED` withheld nothing. `CLAUDE.md` invariant 3 asks for a machine
+reason code on every refusal, and a reason code that names a non-cause is worse
+than none, because it will be believed. The reason now lists blocking flags
+only.
+
+**Worth noting about how this surfaced.** The rule read as principled and was
+stated confidently in a code comment *and* asserted by a test I had written to
+match it. What caught it was running the pipeline end to end against a fixture
+built from real-world shapes — the plain-number price. A unit test written
+against my own assumption agreed with the assumption.
