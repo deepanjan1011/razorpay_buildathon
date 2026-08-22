@@ -1,6 +1,3 @@
-# Local agent context — not part of the judged artifact
-CLAUDE.md
-
 # Secrets. Razorpay test keys included: CLAUDE.md invariant 5, no live keys ever.
 .env
 .env.*
