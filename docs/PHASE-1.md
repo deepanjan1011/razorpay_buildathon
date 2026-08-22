@@ -80,7 +80,8 @@ type NormalizationFlag =
   | "VARIANTS_SPLIT"
   | "CURRENCY_ASSUMED"
   | "MULTILINGUAL_SOURCE"
-  | "MISSING_REQUIRED_FIELD";
+  | "MISSING_REQUIRED_FIELD"
+  | "PRICE_OUT_OF_BAND";     // outside ₹1 .. ₹10,00,000, see §4
 ```
 
 Nothing with `needs_review: true` is served in the feed. It surfaces in the
@@ -191,6 +192,23 @@ Real small-merchant sheets contain:
 (currency stripping, number coercion, boolean-ish stock values) must not go
 through the model. The model handles semantics: what is this product, what
 category, which attributes.
+
+### Two rules the fixtures exist to enforce
+
+**Fixtures are written from observed real-world data, before the code that
+parses them — never derived from what the parser already handles.** A fixture
+written afterwards is a mirror of the implementation: it asserts whatever the
+code happens to do, and stops finding anything. This is methodology, not
+diligence theatre — `parsePrice("Rs. 1,299/-")` returning ₹0.13 instead of
+₹1,299 was caught only because that string sat in a fixture before the parser
+existed. See `OBSTACLES.md`.
+
+**Extract, do not subtract.** Never clean a value by removing what you do not
+want and trusting the remainder; anything you failed to anticipate survives into
+the result. Match the thing you *do* want instead. Subtraction fails silently
+and produces a plausible wrong value, which is worse than a crash — especially
+on the money path, where a plausible wrong number is compared against a mandate
+ceiling and charged.
 
 ---
 

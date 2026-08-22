@@ -38,6 +38,19 @@ const RANGE = /^[^\d]*[\d.,]+\s*(?:-|–|—|to)\s*[\d.,]+[^\d]*$/i;
 const SHORTHAND = /^([\d.,]+)\s*k$/i;
 
 /**
+ * Belt and braces on the money path. A price outside ₹1 .. ₹10,00,000 is more
+ * likely a parse failure than a real offer from a small merchant, so it is
+ * flagged for review rather than accepted.
+ *
+ * This is deliberately redundant with the extraction fix in `toMinor`: the
+ * `Rs. 1,299/-` bug produced 13 paise, which this band catches on its own. In
+ * the one path where being wrong costs real money, two independent checks that
+ * both have to fail is worth four lines.
+ */
+const MIN_PLAUSIBLE_MINOR = 100; // ₹1
+const MAX_PLAUSIBLE_MINOR = 100_000_000; // ₹10,00,000
+
+/**
  * Converts one already-isolated numeric token to paise.
  * Returns null when the token holds no digits.
  */
@@ -91,6 +104,9 @@ export function parsePrice(raw: unknown): PriceParse {
   const price = toMinor(priceToken);
   if (price.minor === null) return missing();
   if (price.imprecise) flags.push("PRICE_AMBIGUOUS");
+  if (price.minor < MIN_PLAUSIBLE_MINOR || price.minor > MAX_PLAUSIBLE_MINOR) {
+    flags.push("PRICE_OUT_OF_BAND");
+  }
 
   let compare_at_minor: number | null = null;
   if (referenceToken !== undefined) {
@@ -150,20 +166,35 @@ export function parseStock(raw: unknown): StockParse {
 /**
  * Splits an option cell into its values: `S/M/L`, `Red, Blue, Black`.
  *
- * Only fires on a delimiter surrounded by values, so a hyphenated title like
- * `Blk RunShoe M-9` is left alone. Hyphen is deliberately NOT a delimiter — it
- * appears inside sizes far more often than between them.
+ * Hyphen is deliberately NOT a delimiter — it appears inside sizes (`M-9`) far
+ * more often than between them.
+ *
+ * A tight slash is not a delimiter either when it joins multi-word values,
+ * because `1/2 kg` is one size and not two. Grocery sellers size by measure,
+ * and splitting that fraction invents two separately purchasable products that
+ * do not exist. The rule: a slash with no surrounding whitespace only splits
+ * when every resulting part is a single word.
+ *
+ * The cost is that `Half Sleeve/Full Sleeve` stays unsplit. That is the safer
+ * failure — under-splitting yields one variant with a compound name, visible
+ * and fixable in review, while over-splitting silently fabricates SKUs an agent
+ * can buy.
  */
 export function splitList(raw: unknown): string[] {
   const text = asText(raw);
   if (text === "") return [];
 
   const parts = text
-    .split(/\s*[/,|;]\s*|\s+\/\s+/)
+    .split(/\s*[,|;]\s*|\s*\/\s*/)
     .map((p) => p.trim())
     .filter((p) => p !== "");
 
-  return parts.length > 0 ? parts : [text];
+  if (parts.length < 2) return [text];
+
+  const tightSlash = /\S\/\S/.test(text);
+  if (tightSlash && parts.some((p) => /\s/.test(p))) return [text];
+
+  return parts;
 }
 
 // ---------------------------------------------------------------------------

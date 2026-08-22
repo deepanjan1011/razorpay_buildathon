@@ -178,6 +178,12 @@ const case06: SheetSpec[] = [
       ["Silk Saree", null, "Green, Maroon", 4500, "yes"],
       ["Linen Trouser", "30 / 32 / 34", "Beige", 1800, "no"],
       ["Plain Tee", "Free Size", "White", 399, "yes"],
+      // Grocery sellers size by measure. `1/2 kg` is ONE size, not two — the
+      // slash is a fraction. Splitting it invents two products that do not
+      // exist and are individually purchasable.
+      ["Ghee Tin", "1/2 kg", "Plain", 450, "yes"],
+      ["Rice Bag", "5 kg / 10 kg", "Sona Masoori", 320, "yes"],
+      ["Sleeve Style Shirt", "Half Sleeve / Full Sleeve", "White", 890, "yes"],
     ],
   },
 ];

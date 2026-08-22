@@ -292,3 +292,80 @@ reason it surfaced before reaching a mandate ceiling comparison is that
 plausible-looking wrong number is more dangerous than a crash, and a test suite
 written after the implementation would likely have asserted whatever the
 implementation happened to produce.
+
+**Generalised into two standing rules** in `CLAUDE.md` and `PHASE-1.md` §4:
+
+- *Extract, do not subtract.* Removal-based cleaning leaves behind whatever you
+  failed to anticipate. Match what you want instead. Subtraction fails silently;
+  extraction fails loudly.
+- *Fixtures come from observed real-world data, before the parser.* A fixture
+  written afterwards mirrors the implementation and stops finding anything.
+
+---
+
+## 2026-08-22 — Audit: every other coercion checked for the same shape
+
+**Prompted by** the price bug generalising. If removal-based cleaning is wrong
+in `parsePrice`, it is wrong wherever else it appears, and the failure would be
+equally silent.
+
+**Method.** Grepped every `replace` / `split` / `filter` / `trim` / `slice` in
+`lib/ingest/` and classified each as extraction, matching, or subtraction.
+
+**Result — `parsePrice` was the only true instance.**
+
+| Site | Shape | Verdict |
+|---|---|---|
+| `toMinor` numeric parse | was subtraction | fixed, now extraction |
+| `toMinor` shorthand branch | extraction, `NaN`-guarded | clean |
+| `parseStock` | pure match/test, anchored count regex | clean, no subtraction anywhere |
+| `cellText`, `dedupeKey` | whitespace normalisation only | clean |
+| `trimTrailingEmpty` | subtractive, but bounded to trailing empty columns | acceptable |
+| `splitList` | split-based, not subtractive — **but same failure family** | fixed, below |
+
+**`splitList` fabricated variants from a fraction.** Not subtraction, but the
+same silent-plausible-wrong-value shape: `splitList("1/2 kg")` returned
+`["1", "2 kg"]`. Grocery sellers size by measure, so a `Size` column reading
+`1/2 kg` is one size — and the split invents two separately purchasable SKUs
+that do not exist. Worse than the price bug in one respect: an agent could buy
+one of them.
+
+**Fix.** A slash with no surrounding whitespace only splits when every resulting
+part is a single word. `S/M/L` and `30/32/34` still split; `1/2 kg` does not;
+`5 kg / 10 kg` still does, because the slash is spaced.
+
+**Accepted cost.** `Half Sleeve/Full Sleeve` now stays unsplit. Under-splitting
+is the safer failure: it yields one variant with a compound name that a human
+sees in review, where over-splitting silently fabricates buyable SKUs. Pinned by
+a test so it is a decision rather than a regression.
+
+**Declined.** `parseStock` discards `inventory_count` when a word match wins —
+`yes 5 pcs` gives `in_stock` with a null count. Left alone: `inventory_count` is
+internal-only and never reaches the feed (§1.1, ACP has no quantity field), the
+availability answer is still correct, and a looser digit-grab would start
+reading sizes as stock counts (`Size 9 available` → 9 in stock). Wrong in the
+safe direction, at zero published cost.
+
+---
+
+## 2026-08-22 — Sanity band added to the money path
+
+**Why, given the extraction fix already landed.** The `Rs. 1,299/-` bug produced
+13 paise. A plausibility band on the parsed amount would have caught it
+independently, without anyone anticipating that specific malformation — which is
+the whole point, since the next such bug will have a shape nobody predicted.
+
+**Chosen.** Any parsed price below ₹1 or above ₹10,00,000 gets
+`PRICE_OUT_OF_BAND` and therefore `needs_review`, rather than being accepted.
+The value is kept rather than nulled, so the merchant can see what was read from
+their sheet; `needs_review` already withholds it from the feed.
+
+**Why a band and not tighter validation.** The band is not trying to be right
+about what a small merchant charges. It is trying to catch order-of-magnitude
+parse failures, which is a much easier target and does not need tuning. Two
+independent checks that both have to fail is cheap insurance in the one path
+where being wrong costs real money.
+
+**Note.** `PRICE_OUT_OF_BAND` is a new `NormalizationFlag`; `PHASE-1.md` §1 was
+amended rather than overloading `PRICE_AMBIGUOUS`, because
+`CLAUDE.md` invariant 3 wants a distinct machine reason code per refusal.
