@@ -3,28 +3,53 @@
  *
  * The model is asked for semantics and nothing else. It never sees a request
  * for a price, a currency or a stock level; those are parsed deterministically
- * before this runs. CLAUDE.md invariant 1 is therefore structural here rather
- * than a promise: the model cannot influence an amount it is never asked to
- * emit.
+ * before this runs. CLAUDE.md invariant 1 is therefore structural rather than a
+ * promise: the model cannot influence an amount it is never asked to emit.
  *
- * The client is injected so tests, and the eval harness, can run without a key.
+ * The provider is injected. Nothing here or downstream names a vendor — see
+ * providers/types.ts for why, and OBSTACLES.md for what changed.
  */
-import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 
 import { createAjv, formatErrors } from "../schema/ajv.ts";
-import { EXTRACTION_SCHEMA } from "./llm-schema.ts";
-import type { ExtractionBatch } from "./llm-schema.ts";
+import { EXTRACTION_SCHEMA, fromWire } from "./llm-schema.ts";
+import type { ExtractionBatch, WireExtractionBatch } from "./llm-schema.ts";
 import { CATEGORIES } from "./taxonomy.ts";
+import { geminiProvider } from "./providers/gemini.ts";
+import { groqProvider } from "./providers/groq.ts";
+import type { Provider } from "./providers/types.ts";
+
+export { geminiProvider, groqProvider };
+export type { Provider };
 
 /**
- * No dated snapshot exists for this model — `claude-opus-5` is the complete and
- * exact ID, and appending a date produces an invalid one. The eval is therefore
- * made auditable rather than reproducible: every run records `response.model`
- * alongside the number. See docs/NORMALIZATION-EVAL.md.
+ * The provider the pipeline uses by default.
+ *
+ * Gemini, set from the bake-off in OBSTACLES.md rather than by preference:
+ * 100% on the discriminating rows across repeated runs, against 93-98% for the
+ * strongest Groq model, whose every miss was the transliterated-Tamil row.
+ *
+ * That is not the tie the constrained-decoding advantage was meant to settle.
+ * The guarantee protects against a failure that did not occur in any run; the
+ * semantic gap that did occur lands precisely on the merchants this project
+ * exists for. `parseExtraction` validates every provider's output against the
+ * canonical schema anyway, so best-effort adherence degrades to a loud error
+ * rather than a silent bad record.
+ *
+ * Change it here and nowhere else — then re-run the eval, because the number
+ * belongs to the provider that produced it.
  */
-export const MODEL = "claude-opus-5";
-export const EFFORT = "high";
+export function defaultProvider(): Provider {
+  const choice = process.env["NORMALIZER_PROVIDER"] ?? "gemini";
+  switch (choice) {
+    case "groq":
+      return groqProvider();
+    case "gemini":
+      return geminiProvider();
+    default:
+      throw new Error(`unknown NORMALIZER_PROVIDER: ${choice} (groq | gemini)`);
+  }
+}
 
 export const SYSTEM_PROMPT = `You read rows from a small merchant's product spreadsheet and return what each row MEANS.
 
@@ -32,15 +57,16 @@ You are given rows that have already been parsed. Prices, stock levels and curre
 
 For each row, return:
 
-- title: the product name a buyer would recognise. Expand merchant shorthand: "Blk RunShoe M-9" is a black running shoe in men's size 9, so the title is "Running Shoe - Black". Do NOT put the size or colour in the title; they belong in options.
-- title_inferred: true if the sheet had no usable product name and you constructed one.
+- source_row: echo back the source_row you were given, unchanged.
+- title: the product name a buyer would recognise. Expand merchant shorthand: "Blk RunShoe M-9" is a black running shoe in men's size 9, so the title is "Running Shoe". Do NOT put the size or colour in the title; they belong in options.
+- title_inferred: true ONLY if the row gave you nothing to name the product from and you invented one. Expanding merchant shorthand is NOT inferring — "Blk RunShoe M-9" already names the product, so title_inferred is false there. Translating is not inferring either. Set it true when the row genuinely had no name.
 - category: exactly one of the fixed list. You cannot invent members. If nothing fits with confidence, return "unmapped" — do not force-fit.
 - category_confidence: 0-1. Be honest. A low number sends the row to a human, which is the correct outcome when you are unsure.
-- options: ONLY dimensions that distinguish one variant from another of the SAME product — typically Colour and Size. Use the merchant's own values ("9", not "UK 9"), with capitalised keys ("Colour", "Size").
-- attributes: everything else descriptive — material, gender, fit, occasion. These do NOT distinguish variants.
+- options: ONLY dimensions that distinguish one variant from another of the SAME product — typically Colour and Size. Use the merchant's own values ("9", not "UK 9"), with capitalised names ("Colour", "Size"). Empty array if none.
+- attributes: everything else descriptive — material, gender, fit, occasion. These do NOT distinguish variants. Empty array if none.
 - brand: the brand if stated. null if not. Never guess a brand from the product type.
 - description: a short factual description if the sheet gives you material to write one. null otherwise. Never invent features, quality claims or marketing copy.
-- variant_group: a stable slug shared by rows that are variants of ONE product. "Canvas Shoe White" and "Canvas Shoe Black" share "canvas-shoe". A row that stands alone gets null.
+- variant_group: a stable lowercase slug shared by rows that are variants of ONE product. "Canvas Shoe White" and "Canvas Shoe Black" share "canvas-shoe". A row that stands alone gets null.
 - confidence: 0-1 for the row overall.
 
 Some sheets are in Tamil, or in Tamil transliterated into Latin script ("Paruthi Sattai" is a cotton shirt). Read them. Return the title in English where you are confident of the meaning, and preserve the original wording in description when it carries information you cannot translate confidently.
@@ -59,14 +85,20 @@ export type ExtractionInput = {
   cells: Record<string, string>;
 };
 
+export type Fingerprint = {
+  provider: string;
+  conformance: string;
+  model_requested: string;
+  model_served: string;
+  prompt_sha256: string;
+};
+
 export type ExtractionResult = {
   batch: ExtractionBatch;
-  fingerprint: {
-    model_requested: string;
-    model_served: string;
-    effort: string;
-    prompt_sha256: string;
-  };
+  fingerprint: Fingerprint;
+  usage: Record<string, unknown> | null;
+  /** Milliseconds for the call itself. Reported by the bake-off. */
+  latency_ms: number;
 };
 
 const ajv = createAjv();
@@ -88,50 +120,35 @@ export function promptFingerprint(): string {
 
 export type ExtractFn = (rows: ExtractionInput[]) => Promise<ExtractionResult>;
 
-export function createExtractor(client = new Anthropic()): ExtractFn {
+export function createExtractor(provider: Provider = defaultProvider()): ExtractFn {
   return async function extract(rows) {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      system: SYSTEM_PROMPT,
-      output_config: {
-        effort: EFFORT,
-        format: { type: "json_schema", schema: EXTRACTION_SCHEMA },
-      },
-      messages: [{ role: "user", content: JSON.stringify({ rows }) }],
-    });
-
-    if (response.stop_reason === "refusal") {
-      throw new Error(
-        `extraction refused: ${response.stop_details?.explanation ?? "no explanation"}`,
-      );
-    }
-
-    const text = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("");
+    const started = Date.now();
+    const response = await provider.complete(SYSTEM_PROMPT, JSON.stringify({ rows }));
+    const latency_ms = Date.now() - started;
 
     return {
-      batch: parseExtraction(text),
+      batch: parseExtraction(response.text),
       fingerprint: {
-        model_requested: MODEL,
-        model_served: response.model,
-        effort: EFFORT,
+        provider: provider.id,
+        conformance: provider.conformance,
+        model_requested: provider.model,
+        model_served: response.model_served,
         prompt_sha256: promptFingerprint(),
       },
+      usage: response.usage,
+      latency_ms,
     };
   };
 }
 
 /**
  * Validates model output against our own schema before anything downstream
- * touches it.
+ * touches it — identically for every provider, so the two are comparable.
  *
- * Structured output constrains the model, but this is the boundary between a
- * non-deterministic component and deterministic code, and DESIGN.md §7 already
- * records that normalization is non-deterministic and must be measured. A
- * boundary you do not check is a boundary you are trusting.
+ * This runs even for a provider whose decoding is constrained. The constraint
+ * is the provider's claim about itself; this is our check of it, and the
+ * boundary between a non-deterministic component and deterministic code is not
+ * a place to take a vendor's word.
  */
 export function parseExtraction(text: string): ExtractionBatch {
   let parsed: unknown;
@@ -148,5 +165,5 @@ export function parseExtraction(text: string): ExtractionBatch {
     throw new Error(`extraction failed schema validation:\n${errors}`);
   }
 
-  return parsed as ExtractionBatch;
+  return fromWire(parsed as WireExtractionBatch);
 }

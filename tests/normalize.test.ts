@@ -24,6 +24,7 @@ import {
 } from "../lib/normalize/flags.ts";
 import type { NormalizationFlag } from "../lib/normalize/flags.ts";
 import { parseExtraction, promptFingerprint, SYSTEM_PROMPT } from "../lib/normalize/llm.ts";
+import { EXTRACTION_SCHEMA, toGeminiSchema } from "../lib/normalize/llm-schema.ts";
 import type { RowExtraction } from "../lib/normalize/llm-schema.ts";
 import { projectFeed } from "../lib/feed/project.ts";
 import { assertValid } from "../lib/feed/validate.ts";
@@ -383,46 +384,96 @@ describe("end to end: sheet -> normalized -> ACP feed", () => {
 });
 
 describe("model output is validated at the boundary", () => {
-  test("a well-formed batch parses", () => {
-    const batch = parseExtraction(
-      JSON.stringify({ rows: [extraction({ source_row: 7 })] }),
-    );
+  /**
+   * Wire shape: `options` and `attributes` are `{name, value}` arrays, because
+   * neither provider can constrain an open-ended string map. `parseExtraction`
+   * converts to Records at the boundary.
+   */
+  const wire = (over: Record<string, unknown> = {}) => ({
+    source_row: 7,
+    title: "Canvas Shoe",
+    title_inferred: false,
+    category: "footwear",
+    category_confidence: 0.95,
+    options: [{ name: "Size", value: "9" }],
+    attributes: [{ name: "material", value: "canvas" }],
+    brand: null,
+    description: null,
+    variant_group: null,
+    confidence: 0.9,
+    ...over,
+  });
+
+  test("a well-formed batch parses, and pairs become a Record", () => {
+    const batch = parseExtraction(JSON.stringify({ rows: [wire()] }));
     assert.equal(batch.rows.length, 1);
     assert.equal(batch.rows[0]?.category, "footwear");
+    assert.deepEqual(batch.rows[0]?.options, { Size: "9" });
+    assert.deepEqual(batch.rows[0]?.attributes, { material: "canvas" });
   });
 
   test("an invented category is rejected, not accepted and mapped later", () => {
     assert.throws(
-      () =>
-        parseExtraction(
-          JSON.stringify({
-            rows: [{ ...extraction({ source_row: 7 }), category: "sportswear" }],
-          }),
-        ),
+      () => parseExtraction(JSON.stringify({ rows: [wire({ category: "sportswear" })] })),
       /schema validation/,
     );
   });
 
   test("a missing required field is rejected", () => {
-    const { title, ...withoutTitle } = extraction({ source_row: 7 });
+    const { title, ...withoutTitle } = wire();
     assert.throws(
       () => parseExtraction(JSON.stringify({ rows: [withoutTitle] })),
       /schema validation/,
     );
   });
 
-  test("confidence outside 0-1 is rejected", () => {
+  test("a nullable field must be present as null, not omitted", () => {
+    // Constrained decoding requires every field in `required`, so "no brand"
+    // is an explicit null rather than a missing key. A missing key is a schema
+    // violation, not an ambiguity.
+    const { brand, ...withoutBrand } = wire();
     assert.throws(
-      () =>
-        parseExtraction(
-          JSON.stringify({ rows: [{ ...extraction({ source_row: 7 }), confidence: 1.5 }] }),
-        ),
+      () => parseExtraction(JSON.stringify({ rows: [withoutBrand] })),
+      /schema validation/,
+    );
+    assert.doesNotThrow(() => parseExtraction(JSON.stringify({ rows: [wire({ brand: null })] })));
+  });
+
+  test("confidence outside 0-1 is rejected", () => {
+    // Gemini's OpenAPI subset drops minimum/maximum, so this range is NOT
+    // enforced on its wire. Our own validation is what catches it there —
+    // which is exactly the difference the bake-off is weighing.
+    assert.throws(
+      () => parseExtraction(JSON.stringify({ rows: [wire({ confidence: 1.5 })] })),
+      /schema validation/,
+    );
+  });
+
+  test("an open-ended map is rejected — the wire shape is pairs", () => {
+    assert.throws(
+      () => parseExtraction(JSON.stringify({ rows: [wire({ options: { Size: "9" } })] })),
       /schema validation/,
     );
   });
 
   test("non-JSON is reported as such, not swallowed", () => {
     assert.throws(() => parseExtraction("I could not do that"), /not valid JSON/);
+  });
+});
+
+describe("the Gemini schema adapter", () => {
+  test("strips what OpenAPI 3.0 cannot express and converts union nulls", () => {
+    const adapted = toGeminiSchema(EXTRACTION_SCHEMA) as Record<string, unknown>;
+    const serialized = JSON.stringify(adapted);
+
+    assert.ok(!serialized.includes("additionalProperties"));
+    assert.ok(!serialized.includes('"minimum"'));
+    assert.ok(!serialized.includes('"maximum"'));
+    // ["string","null"] must become a concrete type plus nullable.
+    assert.ok(!/\["string","null"\]/.test(serialized));
+    assert.ok(serialized.includes('"nullable":true'));
+    // The enum is the one constraint that survives on both providers.
+    assert.ok(serialized.includes('"unmapped"'));
   });
 });
 

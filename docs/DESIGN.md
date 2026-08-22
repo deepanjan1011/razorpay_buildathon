@@ -200,7 +200,11 @@ Single TypeScript repo.
 - **Razorpay Node SDK** — test mode only
 - **MCP TypeScript SDK** — agent-facing server
 - **LLM** — one structured-output call for normalization; no orchestration
-  framework (a graph around a single call is overhead, not architecture)
+  framework (a graph around a single call is overhead, not architecture).
+  **The provider is swappable, not fixed**: it sits behind the
+  `createExtractor` seam (`lib/normalize/providers/`), and nothing outside
+  that directory names a vendor. Selected by measurement — see the bake-off
+  in `docs/OBSTACLES.md`, which also records why this is not Claude.
 
 ---
 
@@ -210,7 +214,9 @@ Single TypeScript repo.
 - MCP layer is own contribution; ACP lists MCP support as future
 - UPI agent mandates do not exist as a regulated product; test mode only
 - Catalog normalization is LLM-based and therefore non-deterministic —
-  measure it, report an accuracy number, list the failures
+  measure it, report an accuracy number, list the failures. The provider is
+  chosen by bake-off, not preference, and the accuracy number belongs to the
+  provider that produced it
 - Product feed is served, not submitted to any agent platform's ingestion
 
 ---

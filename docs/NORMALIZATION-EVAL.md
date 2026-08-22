@@ -22,30 +22,42 @@ Regenerated whenever the pipeline changes. Never hand-tuned to look better —
 
 ### Required: the run fingerprint
 
-`claude-opus-5` has **no dated model ID**. Unlike `claude-opus-4-5-20251101` or
-`claude-haiku-4-5-20251001`, the current Opus has no immutable snapshot to pin —
-`claude-opus-5` is the complete and exact model string, and appending a date
-produces an invalid ID.
+The normalizer runs on **Gemini**, chosen by the provider bake-off in
+`OBSTACLES.md` — not by preference, and not on Claude, for which no key is
+available. The provider sits behind the `createExtractor` seam, so this can
+change; if it does, the number below is void and must be re-run.
 
-That means this eval cannot be made reproducible by pinning. It is made
-*auditable* instead: every run records the fingerprint below, so if the model
-shifts underneath, the recorded fingerprint changes and the number is visibly
-stale rather than silently wrong. Detection, not prevention — the honest
-description of what is actually available.
+Gemini reports no immutable dated snapshot either. This eval is therefore made
+*auditable* rather than reproducible: every run records what the API actually
+reported, so if the model shifts underneath, the fingerprint changes and the
+number is visibly stale rather than silently wrong. Detection, not prevention —
+the honest description of what is available.
+
+Record the values the provider **actually returns**. Do not map them onto some
+other vendor's field names.
 
 | Field | Source | Why it is recorded |
 |---|---|---|
+| `provider` | `fingerprint.provider` | which seam implementation ran |
+| `conformance` | `fingerprint.conformance` | `constrained` or `best_effort` — changes how much the schema guarantees |
 | `model_requested` | the string sent | what we asked for |
-| `model_served` | `response.model` | what the API says actually ran — the drift signal |
-| `effort` | `output_config.effort` | materially changes output quality |
-| `prompt_sha256` | hash of system prompt + output schema | a prompt edit invalidates the number as surely as a model change |
-| `sdk_version` | `@anthropic-ai/sdk` from `package-lock.json` | client-side behaviour changes too |
+| `model_served` | `modelVersion` from the response | what the API says actually ran — the drift signal |
+| `prompt_sha256` | hash of system prompt + canonical schema | a prompt edit invalidates the number as surely as a model change |
+| `promptTokenCount` | `usageMetadata` | |
+| `candidatesTokenCount` | `usageMetadata` | |
+| `thoughtsTokenCount` | `usageMetadata` | non-zero on this model; part of cost |
+| `totalTokenCount` | `usageMetadata` | |
+| `latency_ms` | measured around the call | |
 | `run_date` | run timestamp | |
 | `source_file` | the sheet evaluated | which catalogue this measures |
 | `n_labelled` | count of hand-labelled products | §5 requires 50 |
 
-If `model_served` differs from any previous run's, the number is not comparable
-to the previous one. Say so here rather than quietly overwriting it.
+If `model_served` differs from a previous run's, the number is not comparable to
+that run. Say so here rather than quietly overwriting it.
+
+**Do not paste the bake-off table into this file.** That table (`OBSTACLES.md`)
+compares providers on ten synthetic rows we wrote ourselves. It is a comparison,
+not a measurement, and the two must not be confused.
 
 ### Required: the results
 

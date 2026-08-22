@@ -527,3 +527,123 @@ named fine — and which row is "first" is an accident of sheet order. Product
 identity now resolves to the best row in the group. This had nothing to do with
 the flag tiers; it was found only because the tier change made the test
 exercise a grouping path nothing had exercised before.
+
+---
+
+## 2026-08-22 — The normalizer no longer runs on Claude
+
+**Why this needs saying at all.** This is a Razorpay Buildathon submission built
+with Claude Code, and the catalogue normalizer runs on Gemini. A judge may
+reasonably wonder why. The reason is mundane: **no Anthropic API key was
+available for this project**, and `DESIGN.md` §6 had named Claude before that
+was known.
+
+**What changed.** Rather than swap one vendor name for another, the provider now
+sits behind a seam — `lib/normalize/providers/`, injected into
+`createExtractor`. Nothing outside that directory names a vendor.
+`DESIGN.md` §6 and `CLAUDE.md` were updated to describe the seam rather than a
+supplier. A provider is ~70 lines; adding Claude later is a file, not a
+refactor.
+
+**Why two candidates rather than one.** Groq and Gemini differ on an axis this
+project specifically cares about, and guessing which way it falls would have
+been guessing:
+
+- **Groq** offers strict mode via **constrained decoding** — the schema
+  restricts which tokens may be emitted, so invalid JSON and out-of-enum
+  categories are *unreachable*, not merely unlikely. On guarantees, Groq is
+  clearly stronger.
+- **Gemini** offers `responseSchema`, an OpenAPI 3.0 subset with **best-effort**
+  adherence. But it is a frontier model where Groq serves open weights, and the
+  semantic work here — Tamil, transliterated Tamil, decomposing
+  `Blk RunShoe M-9`, mapping into a fixed taxonomy — is exactly where open
+  weights are weakest.
+
+Stronger guarantee versus better semantics. The fixtures already discriminate.
+
+---
+
+## 2026-08-22 — Provider bake-off: real numbers
+
+`npm run bakeoff`. Same prompt, same canonical schema, same rows, all providers.
+20 hand-labelled fields across 10 rows chosen to discriminate rather than to
+flatter: the five merchant-shorthand rows from `messy-05` and the five
+Tamil/transliterated rows from `messy-07`.
+
+| field | gpt-oss-120b | qwen3.6-27b | gemini-3.5-flash |
+|---|---|---|---|
+| title | 9/10 → 10/10 | — | **10/10** |
+| category | 9/10 → 9/10 | — | **10/10** |
+| title_inferred | 9/10 → 10/10 | — | **10/10** |
+| colour | 5/5 | — | **5/5** |
+| size | 5/5 | — | **5/5** |
+| **overall** | **93% → 98%** | **0%** | **100% → 100%** |
+| latency (10 rows, 2 calls) | ~7.0s | — | ~16.3s |
+| conformance | constrained | constrained | best-effort |
+| schema violations | none | n/a | **none** |
+
+Two runs shown where they differed.
+
+**Qwen never returned anything.** Every call failed with Groq
+`400 json_validate_failed` and an empty `failed_generation`. That is a finding
+worth keeping: **constrained decoding is model-dependent, not a property of the
+platform.** A model that cannot satisfy the grammar fails the request outright.
+Loud rather than silent, which is the right failure — but it is not the blanket
+guarantee "Groq is constrained" implies.
+
+**Every Groq miss was the same row:** `Vetti - Cotton`. It returned
+`category: "unmapped"` in both runs, and in run 1 also `title: "White Cotton"`
+with `title_inferred: true`. A vetti is a dhoti — everyday Tamil apparel. Under
+our flag tiers that reading queues the product for review and, with
+`title_inferred`, withholds it from the feed entirely.
+
+**Gemini scored 100% in both runs**, including every Tamil row, and produced no
+schema violation despite having no decoding guarantee.
+
+### Decision: Gemini
+
+The tie-break rule was "if it's close, take Groq — constrained decoding is a
+better property than best-effort." That rule is right, and it does not apply
+here, because this is not close on the axis that matters:
+
+1. **The guarantee protected against a failure that never occurred.** Zero
+   schema violations from Gemini across every run. The property is real; its
+   value at this sample size was zero.
+2. **The semantic gap did occur, repeatedly and in the same place.** And that
+   place is the transliterated-Tamil row — the exact demographic this project
+   targets. "Half the Tamil catalogue is withheld or miscategorised" is not a
+   rounding error here; it is the use case.
+3. **Best-effort degrades safely in this codebase.** `parseExtraction`
+   validates every provider's output against the canonical schema before
+   anything downstream sees it, so a violation becomes a loud error rather than
+   a silent bad record. That is what makes the weaker guarantee acceptable —
+   not optimism about the model.
+
+Groq is 2.3× faster. That did not weigh much: this is a batch ingest path, not
+a request path, and 16 seconds for a catalogue is not a constraint.
+
+**Reversal conditions, so this is a decision and not a preference.** Move to
+Groq if the eval on a real sheet shows Gemini schema violations at any material
+rate, or if Gemini's semantic lead does not survive real merchant data. The
+seam makes it a one-line change and a re-run.
+
+### Honest limits of this table
+
+- **n = 10 rows, synthetic.** These are our own fixtures, written by us. They
+  measure which provider reads *our* mess cases better. They are **not** the
+  §5 accuracy number, which needs a real sheet and 50 hand-labelled products.
+  `NORMALIZATION-EVAL.md` stays empty.
+- **One label was wrong on the first run.** Gemini returned `"Veshti"` for
+  வேட்டி and was scored a miss, because the label only accepted
+  `vetti|dhoti`. Veshti is the standard Tamil Nadu romanisation — the label was
+  wrong, not the model. Corrected before the numbers above. Worth recording as
+  the same failure mode as everything else in this file: a check written from an
+  assumption, agreeing with the assumption.
+- **The prompt was sharpened between the smoke test and the bake-off.** On the
+  first real call, Groq set `title_inferred: true` for `Blk RunShoe M-9` and
+  Gemini set `false`. The prompt said "true if the sheet had no usable product
+  name" — ambiguous about whether shorthand counts as a name. Since
+  `TITLE_INFERRED` withholds, that ambiguity was withholding an entire
+  catalogue. The prompt now states explicitly that expanding shorthand and
+  translating are not inferring. Both providers were then measured on the fixed
+  prompt.
