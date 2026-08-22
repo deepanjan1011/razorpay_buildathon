@@ -369,3 +369,41 @@ where being wrong costs real money.
 **Note.** `PRICE_OUT_OF_BAND` is a new `NormalizationFlag`; `PHASE-1.md` §1 was
 amended rather than overloading `PRICE_AMBIGUOUS`, because
 `CLAUDE.md` invariant 3 wants a distinct machine reason code per refusal.
+
+---
+
+## 2026-08-22 — Feed projection built before the normalizer, deliberately
+
+**Not an obstacle — a sequencing decision worth recording**, because the
+alternative is tempting and worse.
+
+The obvious order is normalizer first, then project its output to ACP. Doing it
+that way means every schema problem surfaces as a validation failure on model
+output, where the cause is ambiguous: bad projection, bad normalization, or a
+misread of the spec. Building the projection first against hand-written
+internal records means the normalizer is written against a target that
+provably validates, and any later failure is unambiguously the model's.
+
+**Guard against a vacuous suite.** A conformance test that validates everything
+is worth nothing, and it fails open — the suite stays green while the schema
+silently does nothing. `tests/feed-projection.test.ts` therefore asserts that
+the validator *rejects*: smuggled provenance (`additionalProperties: false`), a
+variant missing its required `title`, a non-integer `Price.amount`, a lowercase
+currency, and an empty `description` object. If the schema ever stops loading,
+those assertions fail rather than the suite going quietly green.
+
+**Also asserted:** no internal-only field name appears anywhere in the
+serialized payload. That is a cheap, blunt check on the lossy-projection rule
+from Decision 3 — it catches a leak that a field-by-field test would miss if
+someone adds a field and forgets the test.
+
+**ajv is currently a devDependency.** It is only used by the conformance suite.
+`DESIGN.md` §2 says every *response* is validated against the schemas, so in
+Phase 2 the same validator runs in the request path and ajv becomes a runtime
+dependency. Flagged here so that move is a known step rather than a surprise.
+
+**Small tooling note.** ajv ships CommonJS with `export =`; under
+`nodenext` + `verbatimModuleSyntax` the runtime import works but TypeScript sees
+a namespace rather than a constructor. Applied ajv's own documented ESM
+workaround. Recorded only so the next person does not think the cast is
+accidental.

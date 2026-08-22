@@ -291,11 +291,15 @@ model even though the transport direction does not. See §6.
 
 ## 8. Done when
 
-- [ ] A real merchant spreadsheet parses end to end
-- [ ] Every §4 mess case has a passing test
-- [ ] Flagged products are reviewable, not silently dropped or guessed
-- [ ] `NORMALIZATION-EVAL.md` exists with a real, un-tuned number
-- [ ] `metadata.json` and `products.jsonl` validate against `schema.feed.json`
+- [ ] A real merchant spreadsheet parses end to end — blocked on a real sheet
+- [x] Every §4 mess case has a passing test
+- [ ] Flagged products are reviewable, not silently dropped or guessed —
+      withheld *with a reason* by the projection; the review UI is not built
+- [ ] `NORMALIZATION-EVAL.md` exists with a real, un-tuned number — blocked on a
+      real sheet. Leave it empty rather than publishing a synthetic number; a
+      placeholder has a way of surviving into the README.
+- [x] `metadata.json` and `products.jsonl` validate against `schema.feed.json`
       at the pinned `2026-04-17`
-- [ ] Every variant traces to its source row
-- [ ] `OBSTACLES.md` has real entries — if it's empty, it wasn't kept honestly
+- [ ] Every variant traces to its source row — `Provenance` is required by the
+      type; enforced end to end once the normalizer populates it
+- [x] `OBSTACLES.md` has real entries — if it's empty, it wasn't kept honestly
