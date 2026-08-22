@@ -84,18 +84,106 @@ fulfillment, totals, status, messages, errors.
 ### Cross-cutting requirements
 
 - Request signing (`Signature` + RFC 3339 `Timestamp` over canonical JSON)
-- Idempotency keys on all mutating calls
 - Input validation, safe retries, per-request authentication
-- Order webhooks with HMAC signature
+- Order webhooks with HMAC signature — `X-Razorpay-Signature` is HMAC-SHA256
+  over the **raw request body**, keyed by the webhook secret (which is not the
+  API key secret). The body must be read as text; parsing and re-serialising
+  breaks the signature.
+
+#### Idempotency is ours to enforce, not the PSP's
+
+ACP requires an `Idempotency-Key` on every mutating call. **Razorpay supports
+idempotency keys on Payout APIs only** — Orders and Payments have no such
+header, so a retried order creation silently creates a *second order*. That is
+exactly the path invariant 4 opens by allowing capped retries on transport
+failure.
+
+So we own it: a table keyed on the incoming ACP `Idempotency-Key`, storing the
+resulting `razorpay_order_id`, consulted before any call is made. Our key also
+goes into Razorpay's `receipt` field (unique, ≤40 chars) so the two systems can
+be reconciled from their dashboard. Same shape as the ingest batch claim — a
+conditional insert, not a lock.
+
+Verified against Razorpay's live documentation, `docs/OBSTACLES.md`.
+
+### Payment: a declared handler, not a delegated token
+
+This replaces an earlier claim that "Razorpay is not a Delegated Payment
+Spec–compatible PSP", which was wrong about where the endpoint lives and
+therefore wrong about why we are not implementing it.
+
+**`POST /agentic_commerce/delegate_payment` is implemented by the MERCHANT.**
+`openapi.delegate_payment.yaml` declares `servers: https://merchant.example.com`,
+and the request body carries a raw card credential — `number` is documented as
+"FPAN/DPAN/network token/virtual PAN". The endpoint's job is to accept a card and
+return a vault token the merchant's own PSP can charge within an `Allowance`.
+
+**We do not implement it because that puts raw card numbers in our
+infrastructure, which is PCI DSS scope.** That is a decision, not a vendor
+limitation, and it is the sentence that belongs in the README.
+
+**What we do instead is what the spec has a slot for.** At `2026-04-17`,
+`PaymentData` is no longer a bare token:
+
+```
+PaymentData  { handler_id, instrument: { type, credential: { type, token } } }
+Capabilities.payment.handlers[] -> PaymentHandler {
+  name (reverse-DNS), psp, requires_delegate_payment, requires_pci_compliance }
+```
+
+We declare one handler:
+
+```json
+{
+  "id": "razorpay_link",
+  "name": "in.agentready.razorpay_payment_link",
+  "psp": "razorpay",
+  "requires_delegate_payment": false,
+  "requires_pci_compliance": false
+}
+```
+
+Stated honestly in the README: a **non-registered** handler under our own
+reverse-DNS name. `dev.acp.seller_backed` was considered and does not fit — it
+sets `requires_delegate_payment: true`, so it routes through the endpoint we are
+declining to implement.
+
+This shrinks the largest deviation from *"the payment spec is interface-only"* to
+*"we declare a handler and decline `delegate_payment` for PCI reasons"*.
+
+### The payment link is the real flow, not a workaround
+
+**There is no server-to-server card payment at Razorpay.** The standard flow
+collects card details in a browser Checkout widget; the server only creates the
+Order beforehand and verifies afterwards. S2S exists but is Third-Party
+Validation for the BFSI sector, not a general card API. Any design in which
+`POST /checkout_sessions/{id}/complete` charges a card directly is fiction.
+
+What a server *can* create is a **Payment Link** (`short_url`) or a QR code —
+both yielding a URL a person opens. So the flow is:
+
+1. Agent drives the session to `ready_for_payment` against authoritative cart
+   state.
+2. `complete` creates a Razorpay order and a payment link, and returns the link
+   as the handler's credential token. **No charge has occurred.**
+3. A human completes payment at that link.
+4. The webhook moves our order to paid, HMAC-verified, idempotent per event id.
+
+This is not a degraded substitute for agentic payment — it is the honest shape
+of it under Indian rails today, and it is the project's own premise: the
+merchant's payments are *already* a Razorpay link. The agent's contribution is
+everything up to and including a correct, mandate-checked, authoritative cart.
+
+The limitation to state plainly: the final authorisation step is human, so this
+is not unattended agentic payment. UPI agent mandates, which would remove that
+step, do not exist as a regulated product (§7).
 
 ### Explicitly not implemented — state in README
 
 - Tax configuration (flat rate stub)
 - Returns / exchanges workflows (out of ACP scope anyway)
-- Real delegated payment tokens — **Razorpay is not a Delegated Payment
-  Spec–compatible PSP.** The delegated payment *interface* is implemented
-  against an own payment handler that settles to Razorpay test-mode orders.
-  This is the single largest deviation from spec and must be stated plainly.
+- `POST /agentic_commerce/delegate_payment` — PCI DSS scope, see above
+- Registered/interoperable payment handler — ours is under our own namespace
 - OpenAI conformance certification
 
 ---
@@ -188,9 +276,10 @@ Append-only. One row per decision, not per request.
   "ts": "2026-08-21T10:04:12Z",
   "session_id": "cs_...",
   "mandate_id": "mnd_...",
-  "actor": "agent" | "system" | "merchant",
+  "actor": "agent" | "system" | "merchant" | "psp",
   "action": "session.create" | "mandate.verify" | "payment.attempt" | ...,
-  "outcome": "allowed" | "refused" | "error",
+  "outcome": "allowed" | "refused" | "error" | "observed",
+  "session_status_at_event": "ready_for_payment" | "canceled" | ...,
   "reason_code": "MANDATE_CEILING_EXCEEDED",
   "reason_human": "Cart total 299900 exceeds mandate ceiling 280000",
   "evidence": { }
@@ -199,6 +288,60 @@ Append-only. One row per decision, not per request.
 
 Every refusal carries a reason code *and* a human string. The dashboard renders
 this timeline — that is what makes "explainable" visible rather than claimed.
+
+### The log must accept events AFTER a session is terminal
+
+This is a schema constraint on the audit log, decided now rather than
+discovered in Phase 5.
+
+**Razorpay documents late authorisation.** A payment can be authorised *after*
+we have refused, cancelled or failed a session — the buyer completes a payment
+link we had given up on, or an issuer authorises slowly. The webhook arrives
+against a session that is already terminal.
+
+The naive schema forbids exactly this. Anything of the form "a session's events
+must be consistent with its state" or "no events after a terminal event" makes
+the log unable to record the one thing most worth recording: **money moved
+against a session we had refused.**
+
+Three rules follow:
+
+1. **The audit log is a record of observations and decisions, never a state
+   machine.** Session state lives in the sessions table. An audit event does not
+   transition anything, so a post-terminal event contradicts nothing — it is an
+   observation about a session whose state is what it is.
+2. **No constraint may reference session state.** No foreign key to a status, no
+   check that orders events by lifecycle, no uniqueness on "terminal event per
+   session". The log is append-only and accepts anything, in any order.
+   Out-of-order webhooks are normal (Razorpay's own docs warn about ordering).
+3. **Each event records the session status observed AT THE TIME**
+   (`session_status_at_event`) alongside the event itself. That is what makes a
+   late authorisation legible later: *the session was `canceled` when this
+   arrived*, rather than a reader having to infer it from timestamps.
+
+**A late authorisation is not an `allowed` outcome.** Recording it as `allowed`
+would assert we permitted a charge we in fact refused — the false-reason-code
+problem again, in the place it does the most damage. The `outcome` set therefore
+gains `observed`: something happened that we did not decide.
+
+```json
+{
+  "action": "payment.late_authorized",
+  "outcome": "observed",
+  "session_status_at_event": "canceled",
+  "reason_code": "LATE_AUTH_AFTER_TERMINAL",
+  "reason_human": "Payment authorized 41m after session was canceled; refund required",
+  "evidence": { "razorpay_payment_id": "pay_...", "canceled_at": "...", "authorized_at": "..." }
+}
+```
+
+Such an event is an **operator action item**, not a completed purchase. The
+refund that follows is itself an audited event. Invariant 4 still holds: nothing
+is retried, and no payment call is made — we are recording a fact, not reacting
+to one.
+
+**Terminal means terminal for us. It does not mean nothing further can be
+observed.**
 
 ---
 
