@@ -3,7 +3,7 @@
  *
  * Not a mock: the constraints, the upserts, the transaction rollback and the
  * `on conflict` semantics all actually execute. The alternative was a database
- * layer nobody could run until Supabase credentials existed — another untested
+ * layer nobody could run until hosted credentials existed — another untested
  * path riding on a green suite that never touched it.
  *
  * The assertions that matter are the exactly-once ones. A resume that re-runs a

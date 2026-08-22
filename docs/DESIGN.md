@@ -196,7 +196,8 @@ audited, gracefully failed — in roughly ninety seconds of video.
 Single TypeScript repo.
 
 - **Next.js (App Router)** — merchant upload UI, dashboard, ACP route handlers
-- **Postgres (Supabase)** — catalog, sessions, mandates, audit log
+- **Postgres** — catalog, sessions, mandates, audit log. Provider-agnostic: a
+  `DATABASE_URL` and plain SQL, no vendor SDK. Currently Neon.
 - **Razorpay Node SDK** — test mode only
 - **MCP TypeScript SDK** — agent-facing server
 - **LLM** — one structured-output call for normalization; no orchestration

@@ -3,8 +3,8 @@
  *
  * No migration framework. The whole mechanism is "read a directory, skip what
  * is recorded, run the rest in a transaction", which is shorter than the
- * configuration a framework would need — and it runs identically against
- * Supabase and against the in-process Postgres the tests use.
+ * configuration a framework would need — and it runs identically against a
+ * hosted Postgres and against the in-process one the tests use.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";

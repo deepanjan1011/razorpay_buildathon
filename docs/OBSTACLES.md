@@ -774,3 +774,47 @@ importance:
 that a limit exists. The cap and the reason for it are stated on camera and in
 the README. A documented limitation is a strength; a quietly trimmed demo is the
 thing this whole file exists to prevent.
+
+---
+
+## 2026-08-22 — Postgres provider: Neon over Supabase, for one concrete reason
+
+**Prompted by** the question "why Supabase?" — and the honest answer was that
+nothing in the repo used it. `grep` found "Supabase" only inside comments. The
+dependency is `pg` plus a `DATABASE_URL`: no `supabase-js`, no auth, no RLS, no
+realtime, no storage, no edge functions. The stack line said "Postgres via
+Supabase" but the code said "Postgres".
+
+**The deciding difference**, from each provider's own current pricing page
+rather than memory:
+
+| | Supabase Free | Neon Free |
+|---|---|---|
+| idle behaviour | *"Free projects are paused after 1 week of inactivity"* | computes suspend after 5 min, **auto-resume on next connection** |
+| recovering from idle | manual restore in the dashboard | none needed |
+| storage | 500 MB | 0.5 GB/project |
+| compute | shared | 100 CU-hours/project/month |
+
+Submission is 4 September and judging may happen days or weeks later. A paused
+project does not read as "their free tier lapsed", it reads as **"their thing is
+broken"** — and it is entirely avoidable. Neon's scale-to-zero has the same
+cost profile without the manual step.
+
+**Chosen.** Neon. Not because it is better software, but because its idle
+behaviour matches how this artifact will actually be consumed.
+
+**Cost of being wrong: one environment variable.** No code changed — the seam
+was already a connection string, and the only edits were comments that named a
+vendor the code never depended on. `CLAUDE.md` and `DESIGN.md` now say
+"Postgres — any provider" with the current choice noted, which is what the code
+already did.
+
+**Correcting earlier advice.** I said to use Supabase's *session* pooler because
+"the transaction pooler breaks explicit `BEGIN`/`COMMIT`". That reasoning was
+wrong. A transaction-mode pooler pins a server connection for the duration of a
+transaction — that is what transaction mode *is*. What actually breaks under it
+is **named prepared statements** and session-level state (`SET`, `LISTEN`,
+advisory locks held across transactions). `pg` uses unnamed statements unless a
+query is given a `name`, and this codebase never does, so the pooled endpoint is
+fine. Use Neon's pooled string; if anything behaves oddly, the direct endpoint
+is the same URL without `-pooler`.

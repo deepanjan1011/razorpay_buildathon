@@ -5,13 +5,14 @@
  * query builder — the SQL in this project is a dozen statements and a builder
  * would be more code than the SQL it generates.
  *
- * TWO IMPLEMENTATIONS, ONE DIALECT. Production uses `pg` against Supabase's
- * Postgres. Tests use PGlite, which is real Postgres compiled to wasm and run
+ * TWO IMPLEMENTATIONS, ONE DIALECT. Production uses `pg` against a hosted
+ * Postgres — nothing here is provider-specific, it is a connection string.
+ * Tests use PGlite, which is real Postgres compiled to wasm and run
  * in-process. Both take the SAME SQL text and the same `$1` parameters, so the
  * statements under test are byte-identical to the ones that ship.
  *
  * That is the point of choosing PGlite over a mock: the alternative was a
- * database layer nobody could exercise until Supabase credentials existed —
+ * database layer nobody could exercise until hosted credentials existed —
  * another untested path shipped on the strength of a green suite that never
  * touched it. Constraints, upserts, transaction rollback and `on conflict`
  * semantics are all genuinely executed here.
@@ -65,7 +66,8 @@ function fromClient(client: {
 }
 
 /**
- * Production. Connects to Supabase Postgres.
+ * Production. Connects to any Postgres — Neon, Supabase, RDS, a local server.
+ * The provider is a URL, not a dependency.
  *
  * Pooled connections and a transaction do not mix — `begin` must land on the
  * same connection as the statements that follow it — so a transaction checks a
@@ -75,7 +77,7 @@ export async function connect(connectionString?: string): Promise<Sql> {
   const url = connectionString ?? process.env["DATABASE_URL"];
   if (!url) {
     throw new Error(
-      "DATABASE_URL is not set. See docs/PHASE-1.md §7 for Supabase setup.",
+      "DATABASE_URL is not set. See docs/PHASE-1.md §7 for database setup.",
     );
   }
 
