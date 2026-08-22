@@ -31,11 +31,19 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+// Node does not read .env on its own. Load it if present, so `cp .env.example
+// .env` and fill it in is genuinely all that is needed.
+try {
+  process.loadEnvFile();
+} catch {
+  // No .env — fall through to the env var check below.
+}
+
 if (!process.env["ANTHROPIC_API_KEY"]) {
   fail(
     "ANTHROPIC_API_KEY is not set.\n" +
-      "  cp .env.example .env and fill it in, then:\n" +
-      "  export ANTHROPIC_API_KEY=... && npm run smoke",
+      "  cp .env.example .env  and put your key in it, then: npm run smoke\n" +
+      "  (or: export ANTHROPIC_API_KEY=... && npm run smoke)",
   );
 }
 
