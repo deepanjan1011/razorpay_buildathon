@@ -237,3 +237,58 @@ agent-hosted and that agents MUST NOT call it on merchants. The OpenAPI
 anyway. Do not paper over either in the conformance suite: assert what the
 schema actually defines and record the hole here rather than inventing a local
 schema and calling the result conformant.
+
+---
+
+## 2026-08-22 — Header detection by known field names fails on the Tamil sheet
+
+**Hit.** First cut of `detectHeader` scored each candidate row by what fraction
+of its cells matched a list of known field names (`item`, `price`, `stock`, …)
+and required ≥0.5. It worked on nine fixtures and failed on
+`messy-07-multilingual.xlsx`, whose header row is `பொருள் | விலை | Stock` — one
+of three cells recognisable, score 0.33, rejected. The sheet then parsed as
+having no header at all.
+
+**Why that mattered more than one fixture.** The failure is not specific to
+Tamil. Any sheet whose headers are not in the synonym list — another language,
+an abbreviation, a merchant's own shorthand — degrades to "no header", and the
+list can never be complete. A tactic that works only for English small
+merchants is the wrong tactic for this project.
+
+**What worked.** Replaced the name test with a structural one: a header row is
+all non-numeric, has at least two filled cells, and is followed by a row
+containing a number. That is script-agnostic and passes all ten fixtures,
+including the two-row header case — which needed no special handling at all,
+because the banner row (`Product Details` / `Pricing`) is followed by another
+all-text row and is therefore rejected, while the real field-name row below it
+is followed by numbers and is accepted.
+
+**Kept anyway.** The synonym list survives as `headerScore`, reported but never
+used as the gate. It tells the review queue how confident the header mapping is
+without deciding anything.
+
+---
+
+## 2026-08-22 — Price parsing produced ₹0.13 for `Rs. 1,299/-`
+
+**Hit.** `parsePrice("Rs. 1,299/-")` returned `13` paise instead of `129900`.
+
+**Cause.** The cleaner was subtractive: strip the currency marker, strip the
+trailing `/-`, strip commas, strip anything left that is not a digit or a dot.
+The marker regex `\bRs\.?\b` matched only `Rs` — the trailing `\b` cannot sit
+between `.` and a space — so the full stop survived, leaving `.1299`, which is
+a perfectly valid number. `0.1299` rupees, rounded to 13 paise. No parse error,
+no exception, just a wrong price two orders of magnitude out.
+
+**What worked.** Stopped subtracting and started extracting: strip commas, then
+match `/\d+(?:\.\d+)?/` and take the first hit. Removing text you do not want
+leaves whatever you failed to anticipate; matching the number you do want
+leaves nothing.
+
+**Why this one is worth writing down.** It is exactly the failure mode the
+invariants exist for. It is silent, it is in the money path, and the only
+reason it surfaced before reaching a mandate ceiling comparison is that
+`Rs. 1,299/-` was written into a fixture *before* the parser existed. A
+plausible-looking wrong number is more dangerous than a crash, and a test suite
+written after the implementation would likely have asserted whatever the
+implementation happened to produce.
