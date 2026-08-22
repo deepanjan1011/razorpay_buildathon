@@ -102,8 +102,8 @@ anything short of genuinely unsafe. Three tiers:
 | Tier | Flags | Served to agents | In the review queue |
 |---|---|---|---|
 | **Withholding** | `MISSING_REQUIRED_FIELD`, `PRICE_AMBIGUOUS`, `PRICE_OUT_OF_BAND`, `TITLE_INFERRED` | no | yes |
-| **Review-only** | `CATEGORY_UNMAPPED` | **yes** | yes |
-| **Advisory** | `CURRENCY_ASSUMED`, `VARIANTS_SPLIT`, `MULTILINGUAL_SOURCE` | yes | no |
+| **Review-only** | `CATEGORY_UNMAPPED`, `STOCK_UNKNOWN` | **yes** | yes |
+| **Advisory** | `CURRENCY_ASSUMED`, `VARIANTS_SPLIT`, `MULTILINGUAL_SOURCE`, `STOCK_NOT_TRACKED` | yes | no |
 
 Withholding is for wrong-in-an-unrecoverable-way: a bad price is charged against
 a mandate ceiling, a fabricated title makes an agent buy the wrong object.
@@ -153,7 +153,7 @@ slot and no extension mechanism that reaches feeds (verified — see
 | `Variant.compare_at_price` | `Variant.list_price` | |
 | `Variant.category` | `Variant.categories[0]` | `{value, taxonomy: "agentready"}` — `taxonomy` is a free string, so our fixed enum is legal as its own named taxonomy |
 | `Variant.category_raw` | `Variant.categories[1]` | `{value: raw, taxonomy: "merchant"}` — verbatim preservation is spec-native here |
-| `Variant.availability` | `Variant.availability` | `{available: bool, status: string}`. ACP has no `"unknown"`; the normalizer flags it `MISSING_REQUIRED_FIELD`, which withholds, so it never ships |
+| `Variant.availability` | `Variant.availability` | `{available: bool, status: string}` — **both optional**. `unknown` is published as ABSENCE: the key is omitted rather than guessed into `in_stock`. §3.3 makes checkout authoritative, so an absent signal asserts nothing false |
 | `Variant.options` | `Variant.variant_options[]` | `{name, value}` — colour/size only |
 | `Variant.image_url` | `Variant.media[0]` | |
 

@@ -60,22 +60,24 @@ function price(money: { amount_minor: number; currency: "INR" }): ACPPrice {
 
 /**
  * ACP models stock as a boolean plus an extensible status string, with no
- * quantity field. `unknown` has no representation and must never ship — the
- * normalizer flags it MISSING_REQUIRED_FIELD, which withholds, so a variant
- * carrying it never reaches here. This throws rather than inventing a value if
- * that ever stops holding.
+ * quantity field — and BOTH are optional.
+ *
+ * So `unknown` is published as absence: the key is omitted entirely rather than
+ * guessed into `in_stock`. That is the honest encoding of "this merchant's
+ * sheet does not track stock", which describes most small-merchant price lists.
+ * The spec supports it — `rfc.product_feeds.md` §3.3 makes checkout
+ * authoritative and §7 forbids agents treating feed availability as
+ * guaranteed — so an absent signal costs discovery nothing and asserts nothing
+ * false.
  */
-function availability(variant: Variant): ACPAvailability {
+function availability(variant: Variant): ACPAvailability | undefined {
   switch (variant.availability) {
     case "in_stock":
       return { available: true, status: "in_stock" };
     case "out_of_stock":
       return { available: false, status: "out_of_stock" };
     case "unknown":
-      throw new Error(
-        `variant ${variant.id}: availability "unknown" has no ACP representation ` +
-          `and must be withheld, not published`,
-      );
+      return undefined;
   }
 }
 
@@ -132,9 +134,11 @@ function projectVariant(variant: Variant): ACPVariant {
     id: variant.id,
     title: variant.title,
     price: price(variant.price),
-    availability: availability(variant),
     categories: categories(variant),
   };
+
+  const stock = availability(variant);
+  if (stock !== undefined) out.availability = stock;
 
   if (variant.compare_at_price !== null) {
     out.list_price = price(variant.compare_at_price);

@@ -818,3 +818,57 @@ advisory locks held across transactions). `pg` uses unnamed statements unless a
 query is given a `name`, and this codebase never does, so the pooled endpoint is
 fine. Use Neon's pooled string; if anything behaves oddly, the direct endpoint
 is the same URL without `-pooler`.
+
+---
+
+## 2026-08-22 — First live end-to-end run served ZERO products
+
+**The run.** Real Neon, real Gemini, `messy-03` (14 rows), full pipeline: parse
+→ job → extract → assemble → project → validate. Everything "worked":
+`complete 14/14`, 12 products, 14 variants, ACP valid.
+
+**Served: 0. Withheld: 26.** Every record, `MISSING_REQUIRED_FIELD`.
+
+**Cause.** `messy-03`'s columns are `Category | Item | Price`. **There is no
+stock column.** `parseStock(null)` returns `unknown`, the normalizer flagged
+that `MISSING_REQUIRED_FIELD`, which withholds — so a sheet that does not track
+stock produced an empty feed.
+
+Most small-merchant sheets are PRICE LISTS. They have no stock column. This is
+the `CURRENCY_ASSUMED` failure a third time: a condition true of a large
+fraction of real sheets, silently emptying the feed, passing every test.
+
+**Why the old behaviour was wrong on the spec too.** Both `Availability` fields
+are OPTIONAL, and `rfc.product_feeds.md` §3.3 makes checkout authoritative over
+feed data while §7 forbids agents treating feed availability as guaranteed.
+Availability is a signal; the authority is downstream. Withholding for an absent
+signal was defence in the wrong layer — the same diagnosis as
+`CATEGORY_UNMAPPED`.
+
+**Fix, part one.** `unknown` is published as ABSENCE: the `availability` key is
+omitted rather than guessed into `in_stock`. That is the honest encoding of "we
+were not told", it is spec-legal, and it asserts nothing false. Result: 12
+served, 0 withheld, ACP valid.
+
+**Fix, part two — found by looking at the fixed run.** With stock now
+review-only, the run reported `review queue: 14 of 14`. The merchant's ENTIRE
+catalogue queued, to tell them something they already know: their spreadsheet
+has no stock column. That is the rubber-stamp failure, and catching it required
+reading the output rather than the exit code.
+
+Two different facts had been sharing one flag:
+
+| | flag | tier |
+|---|---|---|
+| sheet has NO stock column | `STOCK_NOT_TRACKED` | advisory — a property of the SHEET, surfaced once, not per row |
+| column exists, value unreadable (`-`, `??`) | `STOCK_UNKNOWN` | review-only — a real per-row uncertainty |
+
+**The pattern, now three for three.** Every one of these was a condition common
+in real sheets that a synthetic-fixture suite passed cleanly:
+`CURRENCY_ASSUMED` (plain-number prices), `CATEGORY_UNMAPPED` (unmappable
+products), and now stock. In each case the "cautious" rule was the harmful one,
+and in each case the fix was to ask *what does this flag actually assert* rather
+than *does it sound risky*.
+
+**And it took a live run to find.** 160 tests were green. The gate is a real
+sheet going in and a valid feed coming out — not a suite agreeing with itself.

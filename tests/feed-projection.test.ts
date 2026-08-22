@@ -392,14 +392,52 @@ describe("nothing flagged reaches the feed", () => {
     ]);
   });
 
-  test("availability 'unknown' throws rather than being published as a guess", () => {
-    assert.throws(
-      () =>
-        projectProduct(
-          product({ variants: [variant({ availability: "unknown" })] }),
-        ),
-      /unknown.*must be withheld/s,
+  test("unknown stock is published as ABSENCE, never guessed into in_stock", () => {
+    // Most small-merchant sheets are price lists with no stock column at all.
+    // The first real end-to-end run withheld 26 of 26 records on a sheet whose
+    // columns were Category / Item / Price. Both ACP availability fields are
+    // optional, and §3.3 makes checkout authoritative, so omitting the key is
+    // both legal and the only honest encoding of "we were not told".
+    const { product: acp, withheld } = projectProduct(
+      product({ variants: [variant({ availability: "unknown" })] }),
     );
+    assert.ok(acp, "an untracked-stock product must still reach agents");
+    assert.deepEqual(withheld, []);
+
+    const [v] = acp.variants;
+    assert.ok(v);
+    assert.ok(!("availability" in v), "the key is absent, not a guessed value");
+    assertValid("Product", acp);
+  });
+
+  test("known stock is still published both ways", () => {
+    const inStock = projectProduct(product()).product;
+    assert.deepEqual(inStock?.variants[0]?.availability, {
+      available: true,
+      status: "in_stock",
+    });
+
+    const out = projectProduct(
+      product({ variants: [variant({ availability: "out_of_stock" })] }),
+    ).product;
+    assert.deepEqual(out?.variants[0]?.availability, {
+      available: false,
+      status: "out_of_stock",
+    });
+  });
+
+  test("a price-list sheet with no stock column still yields a servable feed", () => {
+    // The regression this whole change exists for.
+    const feed = projectFeed(
+      [
+        product({ variants: [variant({ availability: "unknown" })] }),
+        product({ id: "prod_two", variants: [variant({ id: "v2", availability: "unknown" })] }),
+      ],
+      { feedId: "feed_pricelist", targetCountry: "IN" },
+    );
+    assert.equal(feed.products.length, 2);
+    assert.equal(feed.withheld.length, 0);
+    assertValid("ProductsResponse", { products: feed.products });
   });
 });
 

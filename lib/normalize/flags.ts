@@ -7,7 +7,9 @@ export type NormalizationFlag =
   | "CURRENCY_ASSUMED"
   | "MULTILINGUAL_SOURCE"
   | "MISSING_REQUIRED_FIELD"
-  | "PRICE_OUT_OF_BAND";
+  | "PRICE_OUT_OF_BAND"
+  | "STOCK_UNKNOWN"
+  | "STOCK_NOT_TRACKED";
 
 /**
  * Flags answer TWO independent questions, not one.
@@ -73,7 +75,21 @@ export const WITHHOLDING_FLAGS = new Set<NormalizationFlag>([
  * "skip the category test when the product is unmapped", this tier becomes
  * unsafe and CATEGORY_UNMAPPED must move to WITHHOLDING_FLAGS.
  */
-export const REVIEW_ONLY_FLAGS = new Set<NormalizationFlag>(["CATEGORY_UNMAPPED"]);
+export const REVIEW_ONLY_FLAGS = new Set<NormalizationFlag>([
+  "CATEGORY_UNMAPPED",
+  /**
+   * `STOCK_UNKNOWN` means the sheet HAS a stock column and this row's value was
+   * unreadable — a genuine per-row uncertainty a human should look at. It does
+   * not withhold, because ACP puts that authority elsewhere on purpose:
+   * `rfc.product_feeds.md` §3.3 makes checkout authoritative over feed data and
+   * §7 says agents MUST NOT treat feed availability as guaranteed. Both
+   * `Availability` fields are optional, so the feed publishes no stock state
+   * rather than asserting an `in_stock` it cannot support.
+   *
+   * The distinction from `STOCK_NOT_TRACKED` is the whole point — see below.
+   */
+  "STOCK_UNKNOWN",
+]);
 
 /**
  * Advisory — neither withholds nor queues:
@@ -85,6 +101,13 @@ export const REVIEW_ONLY_FLAGS = new Set<NormalizationFlag>(["CATEGORY_UNMAPPED"
  * - VARIANTS_SPLIT — one row became several variants. The splitting is
  *   deterministic, and `splitList` refuses the case that could fabricate SKUs
  *   (a measure like `1/2 kg`).
+ * - STOCK_NOT_TRACKED — the sheet has NO stock column at all. That is a fact
+ *   about the SHEET, not an uncertainty about a row, and it is true of most
+ *   small-merchant price lists. Queueing it per row would put the merchant's
+ *   entire catalogue in review to tell them something they already know — and a
+ *   review queue holding everything is one they rubber-stamp, which destroys
+ *   the check. Recorded as provenance; surfaced once at sheet level, not
+ *   fourteen times.
  * - MULTILINGUAL_SOURCE — the cell contained Indic script. Whether the reading
  *   is trustworthy is carried by the model's own `confidence`, already
  *   thresholded. Blocking on script alone would queue every row of a

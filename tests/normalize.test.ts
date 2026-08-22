@@ -36,6 +36,7 @@ const ADVISORY: NormalizationFlag[] = [
   "CURRENCY_ASSUMED",
   "VARIANTS_SPLIT",
   "MULTILINGUAL_SOURCE",
+  "STOCK_NOT_TRACKED",
 ];
 
 function extraction(over: Partial<RowExtraction> & { source_row: number }): RowExtraction {
@@ -486,5 +487,54 @@ describe("run fingerprint", () => {
   test("the prompt never asks the model for a price", () => {
     // If this ever fails, invariant 1 has been weakened by a prompt edit.
     assert.match(SYSTEM_PROMPT, /never infer, restate or correct them/);
+  });
+});
+
+
+describe("a price list with no stock column", () => {
+  test("does not queue the merchant's whole catalogue", async () => {
+    // messy-03 columns are Category | Item | Price — no stock column, like most
+    // real price lists. The first live run queued 14 of 14 rows to tell the
+    // merchant something they already know. A queue holding everything is one
+    // they rubber-stamp.
+    const [sheet] = await parseWorkbook(fixture("messy-03-merged-category.xlsx"));
+    assert.ok(sheet);
+    assert.equal(findField(sheet.headers, "stock"), null, "fixture has no stock column");
+
+    const products = normalizeSheet(
+      sheet,
+      sheet.rows.map((r) => extraction({ source_row: r.row })),
+      { merchantId: "mer_x", sourceFile: "messy-03-merged-category.xlsx" },
+    );
+    const variants = products.flatMap((p) => p.variants);
+
+    for (const v of variants) {
+      assert.ok(v.normalization.flags.includes("STOCK_NOT_TRACKED"));
+      assert.equal(v.normalization.needs_review, false, "sheet-level fact, not a row problem");
+      assert.equal(isServable(v.normalization.flags), true);
+    }
+  });
+
+  test("but an unreadable value in a column that EXISTS is queued", async () => {
+    const [sheet] = await parseWorkbook(fixture("messy-10-stock.xlsx"));
+    assert.ok(sheet);
+    assert.ok(findField(sheet.headers, "stock"), "fixture has a stock column");
+
+    const products = normalizeSheet(
+      sheet,
+      sheet.rows.map((r) => extraction({ source_row: r.row })),
+      { merchantId: "mer_x", sourceFile: "messy-10-stock.xlsx" },
+    );
+    const variants = products.flatMap((p) => p.variants);
+
+    // "-", "??" etc. are per-row uncertainty and do get a human glance.
+    const unreadable = variants.filter((v) => v.availability === "unknown");
+    assert.ok(unreadable.length > 0);
+    for (const v of unreadable) {
+      assert.ok(v.normalization.flags.includes("STOCK_UNKNOWN"));
+      assert.equal(v.normalization.needs_review, true);
+      assert.equal(isServable(v.normalization.flags), true, "queued, not withheld");
+    }
+    assert.ok(!variants.some((v) => v.normalization.flags.includes("STOCK_NOT_TRACKED")));
   });
 });
