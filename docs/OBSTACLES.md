@@ -7,13 +7,26 @@ Written as encountered, not reconstructed.
 
 ## The finding that generalises
 
-Three separate bugs in this file are the same bug. They are logged separately
-below because that is how they were hit, but the pattern is the most
-transferable thing in this project and reads badly scattered.
+**A green test suite proves the code is consistent with itself. It proves
+nothing about the world the code runs in.**
 
-**Each was a withholding rule whose trigger condition is ubiquitous in real
-merchant sheets.** Each emptied the product feed. Each passed a full green test
-suite.
+Four bugs in this file are that one finding, wearing two faces. They are logged
+separately below because that is how they were hit, but scattered they read as
+four small mistakes rather than one large lesson.
+
+| Face | What the suite failed to vary | Bugs |
+|---|---|---|
+| **Data** | the *shape of the input* — every fixture was one we wrote | `CURRENCY_ASSUMED` empties the feed; `CATEGORY_UNMAPPED` hides the catalogue; unknown stock empties it again |
+| **Environment** | the *place the code runs* — every test ran under plain Node | `import.meta.dirname` undefined in a Next route bundle |
+
+Both faces produce the same symptom: **everything green, nothing working.** And
+both were found the same way — by running the real thing against something the
+suite had never varied, then *reading the output rather than the exit code*.
+
+### Face one: the data
+
+Three withholding rules, each with a trigger condition ubiquitous in real
+merchant sheets.
 
 | Rule | Trigger | Rate on real sheets | Effect |
 |---|---|---|---|
@@ -21,18 +34,40 @@ suite.
 | `CATEGORY_UNMAPPED` withholds | product the mapper cannot place | large fraction | catalogue invisible to agents |
 | unknown stock withholds | sheet has no stock column | most price lists | feed empty again |
 
-### Why a green suite never caught them
-
 **A test written from a rule agrees with the rule.** Each of these had passing
 unit tests — the tests asserted the wrong behaviour faithfully. The rules were
 not *inconsistent*, they were *wrong*, and consistency is all a suite checks.
 
-What found all three was the same thing every time: **running the whole pipeline
-against data shaped like the real world, and reading the output rather than the
-exit code.** The third was found on a run that reported `complete 14/14`,
-12 products, `ACP valid` — and served zero. The exit code was 0.
+The third was found on a run that reported `complete 14/14`, 12 products,
+`ACP valid` — and served zero. The exit code was 0.
 
-### The two rules this produced
+### Face two: the environment
+
+`lib/feed/validate.ts` loaded the pinned ACP schema with
+`readFileSync(join(import.meta.dirname, …))`. That is correct under Node, and
+`import.meta.dirname` is **undefined inside a Next route bundle** — so
+`next build` failed on a module that 184 tests exercise constantly.
+
+No test could have caught it, and adding more tests would not have helped: every
+test runs that code under plain Node, so the suite had one environment and the
+product has two. The fix was to import the schema as JSON, which removes the
+filesystem from the runtime path entirely.
+
+This is the same failure as the three above with a different variable held
+constant. Where those never varied the *input*, this never varied the *host*.
+
+### What actually finds these
+
+- **Run the real thing, in the real place.** The data bugs needed the pipeline
+  against real-world-shaped sheets; the environment bug needed `next build` and
+  a server answering `curl`. Neither needed a cleverer unit test.
+- **Read the output, not the exit code.** Three of the four reported success
+  while being wrong.
+- **Vary the axis the suite holds constant.** Ask what every test has in common —
+  same fixtures we authored, same runtime, same process — because that is
+  precisely where the suite is blind.
+
+### The rules this produced
 
 1. **A rule that withholds is only safe if it withholds a minority of real
    rows.** For every blocking flag, state its expected trigger rate; if it is
@@ -42,6 +77,11 @@ exit code.** The third was found on a run that reported `complete 14/14`,
 2. **Tests derived from a rule cannot falsify the rule.** Every rule needs at
    least one end-to-end assertion against a fixture built from real-world shape.
    (`CLAUDE.md`, `PHASE-1.md` §4)
+3. **A suite that runs in one environment says nothing about a second one.**
+   Anything that ships to a different host — a bundler, a serverless runtime, a
+   browser — needs at least one check *in that host*. `npm run build` and one
+   real HTTP request are worth more than any number of extra unit tests here.
+   (`CLAUDE.md`)
 
 ### Ask what a flag asserts, not whether it sounds risky
 
@@ -1091,3 +1131,143 @@ First time the route handlers served over the network rather than being called
 as functions. Nothing new broke, which is worth recording precisely because the
 bundler bug above shows that "called as a function in a test" and "served by the
 framework" are different environments.
+
+---
+
+## 2026-08-22 — PHASE 2 RECONCILIATION: Razorpay test mode vs DESIGN.md §2
+
+Done before any implementation, the same way the ACP feed spec was reconciled in
+Phase 1. Sources: Razorpay's live API docs, and ACP `2026-04-17`
+`openapi.agentic_checkout.yaml` / `openapi.delegate_payment.yaml` /
+`rfc.seller_backed_payment_handler.md`.
+
+### What matches DESIGN.md, and needs no change
+
+| Claim | Verified |
+|---|---|
+| Amounts are integer minor units | `POST /v1/orders` takes `amount` in "the smallest currency sub-unit" — ₹299 is `29900`. Matches invariant 6 exactly; no float ever crosses the boundary. |
+| Test mode is real and separate | Test keys, test cards, and webhooks that fire on test-mode transactions with an identical payload shape to live. Invariant 5 holds without special handling. |
+| Order webhooks with HMAC signature | `X-Razorpay-Signature` = HMAC-SHA256 over the **raw request body**, keyed by the **webhook secret**. |
+
+### Mismatch 1 — "Idempotency keys on all mutating calls" is not available
+
+DESIGN.md §2 lists idempotency keys as a cross-cutting requirement. **Razorpay
+supports `Idempotency-Key` on Payout APIs only** — the documentation for it sits
+under *Payout APIs → Payout Idempotency* and says "for **payout** API requests".
+Orders and Payments have no equivalent header.
+
+*Consequence.* A retried `POST /v1/orders` creates a SECOND order. Under
+invariant 4 (capped retries on transport failure) that is exactly the path we
+will exercise.
+
+*Resolution.* We own idempotency instead of delegating it: a table keyed on the
+ACP `Idempotency-Key` storing the resulting `razorpay_order_id`, checked before
+any call. Razorpay's `receipt` field (unique, ≤40 chars) carries our key so the
+two can be reconciled from their dashboard. This is the same shape as the batch
+claim in the ingest layer — a conditional insert, not a lock.
+
+*Amend DESIGN.md* to say idempotency is enforced by us, not by the PSP.
+
+### Mismatch 2 — the delegated-payment framing is wrong, and the real reason is stronger
+
+DESIGN.md §2 says: *"Razorpay is not a Delegated Payment Spec–compatible PSP."*
+
+That is not what the spec says. `openapi.delegate_payment.yaml` declares
+`servers: https://merchant.example.com` — **the MERCHANT implements
+`POST /agentic_commerce/delegate_payment`**, not the PSP. Its job is to accept a
+raw card credential (`number`: "FPAN/DPAN/network token/virtual PAN") and return
+a vault token the merchant's own PSP can charge within an `Allowance`.
+
+So the blocker is not vendor compatibility. **Implementing that endpoint means
+raw card numbers land in our infrastructure, which is PCI DSS scope.** That is a
+categorical no for a buildathon build, and it is a much better reason than the
+one currently written down — it is a decision, not a limitation.
+
+### Mismatch 3 — DESIGN.md predates the PaymentHandler abstraction
+
+§2 was written against an older spec. At `2026-04-17`, `PaymentData` is no longer
+a bare shared payment token:
+
+```
+PaymentData: { handler_id, instrument: { type, credential: { type, token } }, … }
+Capabilities.payment.handlers[] -> PaymentHandler {
+  name (reverse-DNS), psp, requires_delegate_payment, requires_pci_compliance, … }
+```
+
+There is also `rfc.seller_backed_payment_handler.md` — `dev.acp.seller_backed.*`
+— for payment options "managed and resolved entirely on the seller's backend
+without transferring credentials to the agent", explicitly
+`requires_pci_compliance: false`.
+
+*This is materially better news than DESIGN.md assumes.* Instead of "the
+delegated payment interface is implemented against our own handler, the single
+largest deviation from spec", we can **declare a handler**, which is the
+spec's own extension point. Proposed:
+
+```json
+{ "name": "in.agentready.razorpay_payment_link",
+  "psp": "razorpay",
+  "requires_delegate_payment": false,
+  "requires_pci_compliance": false }
+```
+
+Honest about what it is: a non-registered handler under our own reverse-DNS
+name, where the credential token is a Razorpay reference rather than a card.
+`dev.acp.seller_backed` itself does not fit — it still sets
+`requires_delegate_payment: true`, so it routes through the endpoint we are
+declining to implement.
+
+That converts the largest deviation from *"we did not implement the payment
+spec"* into *"we declared a handler the spec has a slot for, and did not
+implement delegate_payment, because PCI"*. Smaller, and precisely stated.
+
+### Mismatch 4 — no server-to-server card payment exists
+
+The bigger practical constraint, and the one that shapes the whole leg.
+Razorpay's standard flow collects card details in a **browser Checkout widget**;
+the server only creates the Order beforehand and verifies afterwards.
+`razorpay_signature` = HMAC-SHA256(`order_id|payment_id`, `key_secret`) is
+computed *by the browser handler*. S2S exists but is **Third-Party Validation
+for BFSI** (securities, broking, mutual funds) — not a general server-only card
+API.
+
+**An agent cannot complete a card payment purely server-to-server.** Any design
+where our `POST /checkout_sessions/{id}/complete` charges a card directly is
+fiction.
+
+What *is* server-creatable: **Payment Links** (`short_url`) and **QR codes**.
+Both produce a URL a human opens. That is the honest agentic shape — the agent
+gets the session to `ready_for_payment` and hands back a link; a human completes
+it; the webhook moves the order to paid. It also matches the project's premise:
+the merchant's payments are already a Razorpay link.
+
+### Failure behaviour worth designing for now
+
+- Payment states: `created → authorized → captured`, or `failed`. Order:
+  `created → attempted → paid`, with an `attempts` counter.
+- **Late authorisation is real** — Razorpay documents "Manage Late Authorised
+  Payments". A payment can be authorised *after* we have given up and marked a
+  session failed. Phase 5's drift path must therefore treat a terminal session
+  as terminal *for us* while still reconciling a later webhook, rather than
+  assuming failure is final. This interacts with invariant 4: it is a case where
+  not retrying is correct and the state still changes underneath us.
+- Webhook ordering is not guaranteed; Razorpay's own docs point at idempotency
+  and event ordering. Our handler must be idempotent per `event.id`.
+
+### Practical blocker for testing webhooks
+
+Razorpay **cannot deliver webhooks to localhost**, and blacklists most tunnels:
+`ngrok.io`, `loca.lt`, `webhook.site`, `requestbin.com`, `beeceptor.com`,
+`hookbin.com`, `mockbin.org` are all refused. Their recommendation is **zrok**.
+Test-mode webhook setup also prompts for OTP `754081`.
+
+Plan around it: the webhook handler is written as a pure function over
+`(rawBody, signature, secret)` and tested directly with fixtures, so correctness
+does not depend on tunnelling. A tunnel is then needed only once, to prove
+delivery — which is the Phase 1 lesson about environments applied in advance.
+
+### Sequence
+
+Checkout sessions and authoritative cart state first — pure ACP, no Razorpay,
+no payment. That half is fully specified and testable today. The payment leg
+last, because every open question above lives in it.
