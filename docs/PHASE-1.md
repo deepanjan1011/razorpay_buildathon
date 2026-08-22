@@ -262,6 +262,35 @@ against a sheet whose prices are plain numbers. See `OBSTACLES.md`.
 
 ---
 
+## 4a. Throughput, and what it forces
+
+Measured, not assumed (`npm run latency`, `OBSTACLES.md`): extraction cost is
+per **call**, not per row — 507ms/row at batch 100 against 1,096ms/row at batch
+10. But the binding constraint is the provider's rate limit: **5 requests per
+minute**, free tier, for the whole of this build. At the measured 1.5 rows/s:
+
+| catalogue | wall clock |
+|---|---|
+| 100 rows | ~1 min |
+| 500 rows | ~5.5 min |
+| 2,000 rows | ~22 min |
+
+**Therefore the upload is a job, not a request.** Async, with pollable progress,
+resumable at batch granularity, and failed batches surfacing as *flagged
+products* rather than missing ones. That is what a correct ingest pipeline looks
+like at any tier — the rate limit only removed the option of discovering it
+later, in front of a merchant. `extractCatalogue` supplies the library half; the
+job record and poll endpoint are the remaining persistence work.
+
+**The demo ingests a bounded subset (~100 rows), stated on camera.** Not a
+dodge: a bounded run at measured throughput is the system's real behaviour, the
+interesting artifact is the job rather than the wait, and the full-catalogue
+figure is a sentence that does not need filming to be true. What the video must
+not do is present a subset as a full catalogue or hide that a limit exists. Full
+reasoning in `OBSTACLES.md`.
+
+---
+
 ## 5. Accuracy measurement — do not skip
 
 Hand-label 50 products from a real sheet. Run the pipeline. Report:

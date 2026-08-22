@@ -705,9 +705,36 @@ burst of 429s that the retry then serialises anyway, having wasted the attempts.
 **Result: 300/300 rows, zero failures**, 200.9s wall clock — ~670ms/row
 including rate-limit waiting, 1.5 rows/s.
 
-### What this means for the upload flow
+### The constraint forced the right architecture
 
-**The upload cannot be synchronous.** Extrapolating at 1.5 rows/s:
+The temptation, on hitting 5 RPM, is to treat it as an obstacle to apologise for
+— *"normalization is slow because we are on a free tier."* That reading is
+wrong, and it would have led to worse code.
+
+A synchronous upload was never correct. It only *looked* correct while the
+catalogue was ten rows and the round trip was a second. What the rate limit did
+was remove the option of finding that out later, in front of a merchant, with a
+2,000-row sheet and a browser tab that had been open for twenty minutes.
+
+What a correct ingest pipeline needs, at any tier:
+
+| Requirement | Why it is not tier-specific |
+|---|---|
+| **Async job, not a request** | Any LLM-backed ingest over a real catalogue outlives an HTTP request. A paid tier moves the threshold; it does not remove it. |
+| **Pollable progress** | A merchant watching an opaque spinner cannot tell "working" from "hung". They need row counts. |
+| **Resumability at batch granularity** | Connections drop, deploys restart, tokens expire. Re-running a whole catalogue because batch 14 of 20 failed is wasteful at any price. |
+| **Failed rows surfaced, not swallowed** | A batch that 429s must produce *flagged products*, not *missing products* — the same rule as every other unreadable input in this pipeline. |
+
+Every one of those is what the free-tier cap made unavoidable. The convenient
+architecture — `await normalize(sheet)` inside a POST handler — would have
+passed every test we had, demoed fine on a fixture, and failed on the first real
+catalogue.
+
+`extractCatalogue` already supplies the library half: per-batch progress, and
+failed rows returned with a reason rather than thrown. The job record, the poll
+endpoint and resume-from-batch are the remaining Phase 1 persistence work.
+
+**Numbers to plan against**, at the measured 1.5 rows/s:
 
 | catalogue | wall clock |
 |---|---|
@@ -715,14 +742,35 @@ including rate-limit waiting, 1.5 rows/s.
 | 500 rows | ~5.5 min |
 | 2,000 rows | ~22 min |
 
-No merchant holds a browser tab open for five minutes, and a dropped connection
-must not lose the work. The ingest needs a job record, progress the UI can poll,
-and resumability at batch granularity. `extractCatalogue` already reports
-per-batch progress and returns failed rows rather than throwing, which is the
-half of that shape which belongs in the library; the job record is Phase 1
-persistence work.
+**5 RPM is binding through submission.** This is a free-tier build and will not
+be upgraded to paid, so these numbers are the real ones, not a temporary
+embarrassment. `DEFAULT_CONCURRENCY` is one line and the seam is clean if that
+ever changes — but nothing should be designed on the assumption that it will.
 
-**This is a free-tier constraint, not a product constraint.** A paid tier lifts
-the RPM cap and concurrency becomes useful again — at which point the binding
-limit returns to the ~507ms/row call cost, and 500 rows is under a minute.
-Re-measure rather than assume; `DEFAULT_CONCURRENCY` is one line.
+---
+
+## 2026-08-22 — DECISION: the demo ingests a bounded subset, on purpose
+
+**Follows directly from the rate limit.** At 1.5 rows/s a full catalogue is
+minutes of wall clock. Whatever real sheet arrives, the submission video
+**ingests a bounded subset** — on the order of 100 rows, about a minute — rather
+than the whole thing.
+
+**Not a dodge, and the README says so plainly.** Three reasons, in order of
+importance:
+
+1. **It is the honest thing to show.** A bounded run at measured throughput is
+   the system's real behaviour. A pre-warmed cache or a pre-computed feed
+   presented as a live ingest would not be.
+2. **It demonstrates more, not less.** The interesting artifact is the *job* —
+   progress advancing, batches completing, flagged rows landing in review, the
+   feed appearing at the end. Twenty-two minutes of that is the same ninety
+   seconds of information with twenty minutes of silence attached.
+3. **The full-catalogue number is stated rather than performed.** "500 rows in
+   5.5 minutes at 5 requests/minute" is a sentence. It does not need to be
+   filmed in real time to be true, and filming it would not make it more true.
+
+**What the video must not do:** present a subset as a full catalogue, or hide
+that a limit exists. The cap and the reason for it are stated on camera and in
+the README. A documented limitation is a strength; a quietly trimmed demo is the
+thing this whole file exists to prevent.
