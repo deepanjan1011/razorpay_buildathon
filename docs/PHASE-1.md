@@ -296,7 +296,10 @@ no agent-hosted feed service to push to and no `feed_id` to push against. So:
 2. Validate both against `schema.feed.json` at the pinned version. That is the
    conformance suite.
 3. Serve `GET /feeds/{id}` and `GET /feeds/{id}/products` as the read surface
-   our MCP server consumes in Phase 4.
+   our MCP server consumes in Phase 4. **Built** — `app/api/feeds/`, with ACP's
+   flat error shape on 404, `API-Version` on every response and a 400 on
+   mismatch, `ETag` + `If-None-Match`, and outbound schema validation on the
+   real response rather than only in tests.
 
 Conformant payloads, non-conformant transport direction, exactly one deviation
 to declare in the README. Rationale in `OBSTACLES.md` Decision 1.
@@ -350,7 +353,8 @@ model even though the transport direction does not. See §6.
       real sheet. Leave it empty rather than publishing a synthetic number; a
       placeholder has a way of surviving into the README.
 - [x] `metadata.json` and `products.jsonl` validate against `schema.feed.json`
-      at the pinned `2026-04-17`
+      at the pinned `2026-04-17`, and the served responses are validated against
+      it too, in the handler, not only in tests
 - [ ] Every variant traces to its source row — `Provenance` is required by the
       type; enforced end to end once the normalizer populates it
 - [x] `OBSTACLES.md` has real entries — if it's empty, it wasn't kept honestly
