@@ -5,6 +5,66 @@ Written as encountered, not reconstructed.
 
 ---
 
+## The finding that generalises
+
+Three separate bugs in this file are the same bug. They are logged separately
+below because that is how they were hit, but the pattern is the most
+transferable thing in this project and reads badly scattered.
+
+**Each was a withholding rule whose trigger condition is ubiquitous in real
+merchant sheets.** Each emptied the product feed. Each passed a full green test
+suite.
+
+| Rule | Trigger | Rate on real sheets | Effect |
+|---|---|---|---|
+| any flag ⇒ `needs_review` | `CURRENCY_ASSUMED` on any plain-number price | ~every row | feed permanently empty |
+| `CATEGORY_UNMAPPED` withholds | product the mapper cannot place | large fraction | catalogue invisible to agents |
+| unknown stock withholds | sheet has no stock column | most price lists | feed empty again |
+
+### Why a green suite never caught them
+
+**A test written from a rule agrees with the rule.** Each of these had passing
+unit tests — the tests asserted the wrong behaviour faithfully. The rules were
+not *inconsistent*, they were *wrong*, and consistency is all a suite checks.
+
+What found all three was the same thing every time: **running the whole pipeline
+against data shaped like the real world, and reading the output rather than the
+exit code.** The third was found on a run that reported `complete 14/14`,
+12 products, `ACP valid` — and served zero. The exit code was 0.
+
+### The two rules this produced
+
+1. **A rule that withholds is only safe if it withholds a minority of real
+   rows.** For every blocking flag, state its expected trigger rate; if it is
+   not clearly a minority, it is advisory. A withholding rule with a ubiquitous
+   trigger is a denial-of-service on the merchant, and the review queue makes it
+   look like caution. (`CLAUDE.md`)
+2. **Tests derived from a rule cannot falsify the rule.** Every rule needs at
+   least one end-to-end assertion against a fixture built from real-world shape.
+   (`CLAUDE.md`, `PHASE-1.md` §4)
+
+### Ask what a flag asserts, not whether it sounds risky
+
+The fix each time was the same question: *what does this condition actually tell
+us?* `CURRENCY_ASSUMED` asserts nothing — the system is INR-only. Unknown stock
+asserts nothing the spec treats as authoritative. Neither is doubt; both were
+being read as doubt because they were shaped like warnings.
+
+**And where a rule is wrong on spec grounds as well as practical ones, say
+both.** "Withholding on absent availability contradicts `rfc.product_feeds.md`
+§3.3 and §7" is a stronger justification than "it emptied the feed", and it is
+the argument that survives someone disagreeing about the practical part.
+
+### Where this bites next
+
+Phase 3's mandate verification is this failure mode with the stakes raised —
+every check is a withholding rule, and one that refuses too readily makes
+agentic purchase impossible while looking like rigour. The Phase 1 fix does NOT
+transfer: there the cautious default was wrong, but on the money path it is
+right. The answer there is specificity, not looseness. See `DESIGN.md` §3.
+
+---
+
 ## 2026-08-22 — Which ACP version to pin
 
 **Mismatch.** `DESIGN.md` §2 says "pin one dated API version" but names none.

@@ -139,6 +139,39 @@ for no added safety. This requires the mandate category check to treat
 `unmapped` as matching nothing — if that ever changes, unmapped products must be
 withheld. See `docs/PHASE-1.md` §1 and §2.
 
+### Refusals must be SPECIFIC, not loose — read before writing Phase 3
+
+Phase 1 hit the same bug three times: a withholding rule whose trigger was
+ubiquitous in real data emptied the feed, and looked like rigour while doing it
+(`OBSTACLES.md`). Mandate verification is that failure mode with the stakes
+raised: **every check here is a withholding rule**, and a mandate that refuses
+too readily makes agentic purchase impossible — which will also look like
+rigour.
+
+**The Phase 1 fix does not transfer.** There, the cautious default was wrong and
+relaxing it was correct. Here the cautious default is *right*: this is the money
+path, and `CLAUDE.md` invariant 2 is not negotiable. So the answer is not
+looseness. It is **specificity** — each check's trigger condition must be
+exactly the unsafe case, never a proxy that happens to be broader.
+
+Concretely, the difference between a specific check and a loose one:
+
+| Check | Specific (correct) | Loose (refuses valid purchases) |
+|---|---|---|
+| category | refuse only if `constraints.categories` is present AND the product's mapped category is not a member | refuse any `unmapped` product, even when the mandate carries no category constraint |
+| amount ceiling | compare `max_amount` against the FINAL authoritative cart total | compare against an estimate, or per-item, or a pre-tax subtotal |
+| expiry | evaluate at the moment of the payment call | evaluate at session create, refusing mandates still valid when charged |
+| item count | count what the mandate defines as an item | count expanded variants, refusing a legal two-item cart as four |
+| single use | refuse only a mandate already *consumed* | refuse one merely *seen* before, killing legitimate retries |
+
+**Rule for every gate:** state, next to the check, the condition it refuses and
+why that condition is exactly unsafe. A check that cannot be justified that
+precisely is a proxy, and a proxy on the payment path refuses real purchases.
+
+The audit log is what makes this visible: a refusal reason that names a
+non-cause (`OBSTACLES.md`, the false-reason-code entry) will be believed, and a
+loose check produces exactly that.
+
 **Non-negotiable:** the LLM never decides to charge. It may normalize, enrich,
 and reason about intent match. Mandate verification and payment execution are
 deterministic code.
