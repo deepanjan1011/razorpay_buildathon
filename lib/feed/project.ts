@@ -3,15 +3,19 @@
  *
  * Two rules govern everything here:
  *
- * 1. **Nothing with `needs_review` is served.** PHASE-1.md §1. A flagged
- *    variant is withheld, not guessed at; a product whose every variant is
- *    flagged is withheld entirely.
+ * 1. **Nothing unsafe is served.** What the feed serves is decided by
+ *    `isServable`, not by `needs_review` — those are different questions.
+ *    `needs_review` queues a record for the merchant; a WITHHOLDING flag makes
+ *    it unsafe to publish. A product flagged `CATEGORY_UNMAPPED` is served
+ *    *and* queued, because the mandate gate refuses it at payment time anyway
+ *    (flags.ts). A variant with a bad price is withheld; a product whose every
+ *    variant is withheld goes entirely.
  * 2. **The projection is lossy by construction, and that is correct.** Every
  *    ACP object sets `additionalProperties: false`, so provenance, confidence,
  *    inventory counts and merchant ids have nowhere to go. They stay in
  *    Postgres, where they power the review queue, the audit trail and the eval.
  */
-import { isBlocking } from "../normalize/flags.ts";
+import { isServable, isWithholding } from "../normalize/flags.ts";
 import type { NormalizationFlag } from "../normalize/flags.ts";
 import type { Product, Variant } from "../normalize/schema.ts";
 import {
@@ -39,13 +43,14 @@ export type Feed = {
 
 /**
  * The reason a record was withheld names only the flags that actually caused
- * it. Advisory flags ride along on the record but never withhold anything, so
- * listing them here would make the audit trail state a false cause —
- * "withheld: CURRENCY_ASSUMED" is not why anything was withheld. CLAUDE.md
- * invariant 3 wants a reason code that is true.
+ * it. Advisory and review-only flags ride along on the record but withhold
+ * nothing, so listing them here would make the audit trail state a false
+ * cause — "withheld: CURRENCY_ASSUMED" is not why anything was withheld, and
+ * neither is CATEGORY_UNMAPPED, which is served. CLAUDE.md invariant 3 wants a
+ * reason code that is true.
  */
-function blockingReason(flags: readonly NormalizationFlag[]): string {
-  return flags.filter(isBlocking).join(",") || "needs_review";
+function withholdingReason(flags: readonly NormalizationFlag[]): string {
+  return flags.filter(isWithholding).join(",") || "withheld";
 }
 
 /** ACP `Price.currency` is `^[A-Z]{3}$`; the internal model is INR-only. */
@@ -55,9 +60,10 @@ function price(money: { amount_minor: number; currency: "INR" }): ACPPrice {
 
 /**
  * ACP models stock as a boolean plus an extensible status string, with no
- * quantity field. `unknown` has no representation and must never ship — it
- * implies `needs_review`, so a variant carrying it is withheld before reaching
- * here; this throws rather than inventing a value if that ever stops holding.
+ * quantity field. `unknown` has no representation and must never ship — the
+ * normalizer flags it MISSING_REQUIRED_FIELD, which withholds, so a variant
+ * carrying it never reaches here. This throws rather than inventing a value if
+ * that ever stops holding.
  */
 function availability(variant: Variant): ACPAvailability {
   switch (variant.availability) {
@@ -68,7 +74,7 @@ function availability(variant: Variant): ACPAvailability {
     case "unknown":
       throw new Error(
         `variant ${variant.id}: availability "unknown" has no ACP representation ` +
-          `and must be withheld as needs_review, not published`,
+          `and must be withheld, not published`,
       );
   }
 }
@@ -159,14 +165,14 @@ export function projectProduct(
 ): { product: ACPProduct | null; withheld: Feed["withheld"] } {
   const withheld: Feed["withheld"] = [];
 
-  if (product.normalization.needs_review) {
+  if (!isServable(product.normalization.flags)) {
     return {
       product: null,
       withheld: [
         {
           id: product.id,
           kind: "product",
-          reason: blockingReason(product.normalization.flags),
+          reason: withholdingReason(product.normalization.flags),
         },
       ],
     };
@@ -174,11 +180,11 @@ export function projectProduct(
 
   const servable: ACPVariant[] = [];
   for (const variant of product.variants) {
-    if (variant.normalization.needs_review) {
+    if (!isServable(variant.normalization.flags)) {
       withheld.push({
         id: variant.id,
         kind: "variant",
-        reason: blockingReason(variant.normalization.flags),
+        reason: withholdingReason(variant.normalization.flags),
       });
       continue;
     }

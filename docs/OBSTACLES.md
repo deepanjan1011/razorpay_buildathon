@@ -463,3 +463,67 @@ stated confidently in a code comment *and* asserted by a test I had written to
 match it. What caught it was running the pipeline end to end against a fixture
 built from real-world shapes — the plain-number price. A unit test written
 against my own assumption agreed with the assumption.
+
+**Generalised** into `CLAUDE.md` and `PHASE-1.md` §4: *tests derived from a rule
+cannot falsify the rule — every rule needs at least one end-to-end assertion
+against a fixture built from real-world shape, not from the rule.*
+
+**Root cause was in the docs, not just the code.** `PHASE-1.md` §1 said "nothing
+with `needs_review: true` is served" and listed `CURRENCY_ASSUMED` as a flag a
+few lines later. The rule and the flag list were incoherent *together*, and each
+looked fine alone. Worth remembering when reviewing a spec: the contradiction
+was not inside any one sentence.
+
+---
+
+## 2026-08-22 — `CATEGORY_UNMAPPED` was defence in the wrong layer
+
+**Hit.** Pushing the previous finding one rung further: is `CATEGORY_UNMAPPED`
+correctly withholding?
+
+**The problem.** Withholding every product the mapper cannot confidently place
+makes that fraction of the catalogue invisible to agents. On real Indian
+small-merchant sheets that fraction could be large. "The feed is missing half
+your catalogue" is the same failure as the empty feed, one rung down.
+
+**And withholding buys nothing.** The safety check already lives where it
+belongs. Mandate verification matches on `category` only (`DESIGN.md` §3), so a
+product whose category is `unmapped` can never satisfy a mandate carrying a
+category constraint — refused at the payment gate *by construction*, not by a
+rule anyone has to remember. That is `CLAUDE.md` invariant 2's layer. A mandate
+with no category constraint accepts any category by definition, so serving an
+unmapped product is correct there too.
+
+**Underlying conflation, and the actual fix.** "Held for merchant review" and
+"withheld from the feed" are different things, and I had collapsed them into one
+boolean. That forces a bad trade: the only way to ask the merchant about a
+product is to make it invisible to buyers first.
+
+Flags now answer two independent questions, in three tiers:
+
+| Tier | Flags | Served? | Queued? |
+|---|---|---|---|
+| Withholding | `MISSING_REQUIRED_FIELD`, `PRICE_AMBIGUOUS`, `PRICE_OUT_OF_BAND`, `TITLE_INFERRED` | no | yes |
+| Review-only | `CATEGORY_UNMAPPED` | **yes** | yes |
+| Advisory | `CURRENCY_ASSUMED`, `VARIANTS_SPLIT`, `MULTILINGUAL_SOURCE` | yes | no |
+
+`TITLE_INFERRED` stays withholding: a fabricated title makes an agent buy the
+wrong object, which is unrecoverable in the same way a wrong price is. The price
+flags are not close to the line.
+
+**Requirement pushed into Phase 3, and pinned by a test now.** Serving unmapped
+products is only safe while the mandate category check treats `unmapped` as
+matching *nothing*. If that check is ever written as "skip the category test
+when the product is unmapped", this tier becomes unsafe and `CATEGORY_UNMAPPED`
+must move back to withholding. `tests/normalize.test.ts` asserts the property
+today so the requirement cannot quietly evaporate before the mandate layer
+exists.
+
+**A real bug fell out of fixing this.** Changing the test to flag one row of a
+four-row variant group withheld the *entire product*, not one variant. Cause:
+`normalizeSheet` took product identity from whichever row in the group was read
+first, so one row with an inferred title condemned three siblings that were
+named fine — and which row is "first" is an accident of sheet order. Product
+identity now resolves to the best row in the group. This had nothing to do with
+the flag tiers; it was found only because the tier change made the test
+exercise a grouping path nothing had exercised before.

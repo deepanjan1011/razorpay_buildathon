@@ -131,8 +131,13 @@ taxonomy that products are mapped into at ingest — not on merchant free-text.
 Rationale: matching at payment time must be deterministic, and pushing fuzzy
 category resolution into the payment path would put a model in the charge
 decision, violating the invariant below. Products the mapper cannot place with
-confidence become `unmapped` and are held for merchant review rather than
-force-fit. See `docs/PHASE-1.md` §2.
+confidence become `unmapped` and are queued for merchant review rather than
+force-fit. Queued, *not* withheld from the feed: an `unmapped` product cannot
+satisfy a category-constrained mandate, so it is refused at the payment gate by
+construction, and hiding it from discovery as well would cost catalogue coverage
+for no added safety. This requires the mandate category check to treat
+`unmapped` as matching nothing — if that ever changes, unmapped products must be
+withheld. See `docs/PHASE-1.md` §1 and §2.
 
 **Non-negotiable:** the LLM never decides to charge. It may normalize, enrich,
 and reason about intent match. Mandate verification and payment execution are

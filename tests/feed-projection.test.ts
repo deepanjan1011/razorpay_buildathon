@@ -248,16 +248,16 @@ describe("§1.1 mapping rules", () => {
 });
 
 describe("nothing flagged reaches the feed", () => {
-  test("a flagged variant is withheld, with its reason", () => {
+  test("an unsafe variant is withheld, with its reason", () => {
     const result = projectProduct(
       product({
         variants: [
           variant(),
           variant({
-            id: "var_unmapped",
+            id: "var_bad_price",
             normalization: {
               confidence: 0.3,
-              flags: ["CATEGORY_UNMAPPED"],
+              flags: ["PRICE_AMBIGUOUS"],
               needs_review: true,
             },
           }),
@@ -267,7 +267,35 @@ describe("nothing flagged reaches the feed", () => {
     assert.ok(result.product);
     assert.equal(result.product.variants.length, 1);
     assert.deepEqual(result.withheld, [
-      { id: "var_unmapped", kind: "variant", reason: "CATEGORY_UNMAPPED" },
+      { id: "var_bad_price", kind: "variant", reason: "PRICE_AMBIGUOUS" },
+    ]);
+  });
+
+  test("a review-only variant is queued for the merchant but still served", () => {
+    const result = projectProduct(
+      product({
+        variants: [
+          variant({
+            id: "var_unmapped",
+            category: "unmapped",
+            category_raw: "Misc",
+            normalization: {
+              confidence: 0.3,
+              flags: ["CATEGORY_UNMAPPED", "CURRENCY_ASSUMED"],
+              needs_review: true,
+            },
+          }),
+        ],
+      }),
+    );
+    assert.ok(result.product);
+    // needs_review is true, and it still ships — the mandate gate refuses it at
+    // payment time against any category-constrained mandate.
+    assert.equal(result.product.variants.length, 1);
+    assert.deepEqual(result.withheld, []);
+    assert.deepEqual(result.product.variants[0]?.categories, [
+      { value: "unmapped", taxonomy: "agentready" },
+      { value: "Misc", taxonomy: "merchant" },
     ]);
   });
 

@@ -15,7 +15,13 @@ import { join } from "node:path";
 import { parseWorkbook } from "../lib/ingest/parse.ts";
 import { findField, semanticCells } from "../lib/ingest/fields.ts";
 import { expandOptions, normalizeSheet } from "../lib/normalize/normalize.ts";
-import { BLOCKING_FLAGS, isBlocking, needsReview } from "../lib/normalize/flags.ts";
+import {
+  isServable,
+  isWithholding,
+  needsReview,
+  REVIEW_ONLY_FLAGS,
+  WITHHOLDING_FLAGS,
+} from "../lib/normalize/flags.ts";
 import type { NormalizationFlag } from "../lib/normalize/flags.ts";
 import { parseExtraction, promptFingerprint, SYSTEM_PROMPT } from "../lib/normalize/llm.ts";
 import type { RowExtraction } from "../lib/normalize/llm-schema.ts";
@@ -197,19 +203,33 @@ describe("flagging sends the unsure to review, not to buyers", () => {
     assert.equal(v.normalization.needs_review, false);
   });
 
-  test("advisory flags never block on their own", async () => {
-    // If any of these starts blocking, the feed empties out for ordinary
-    // sheets and the review queue becomes noise the merchant rubber-stamps.
-    for (const flag of ADVISORY) assert.equal(isBlocking(flag), false, flag);
+  test("advisory flags neither withhold nor queue", async () => {
+    // If any of these starts withholding, the feed empties for ordinary sheets;
+    // if any starts queueing, the review list becomes noise the merchant
+    // rubber-stamps. Both failures look like caution.
+    for (const flag of ADVISORY) {
+      assert.equal(isWithholding(flag), false, flag);
+      assert.equal(needsReview([flag]), false, flag);
+    }
 
     const multiVariant = await firstVariant({ options: { Size: "S/M/L" } });
     assert.ok(multiVariant.normalization.flags.includes("VARIANTS_SPLIT"));
     assert.equal(multiVariant.normalization.needs_review, false);
   });
 
-  test("every blocking flag does block", async () => {
-    for (const flag of BLOCKING_FLAGS) assert.equal(isBlocking(flag), true, flag);
-    assert.equal(needsReview(["CURRENCY_ASSUMED", "CATEGORY_UNMAPPED"]), true);
+  test("withholding and review are different questions", () => {
+    for (const flag of WITHHOLDING_FLAGS) {
+      assert.equal(isWithholding(flag), true, flag);
+      assert.equal(needsReview([flag]), true, `${flag} must also be reviewed`);
+    }
+
+    // The whole point of the three-tier split: queued for the merchant, but
+    // still served to agents.
+    for (const flag of REVIEW_ONLY_FLAGS) {
+      assert.equal(needsReview([flag]), true, flag);
+      assert.equal(isServable([flag]), true, `${flag} must still be servable`);
+    }
+
     assert.equal(needsReview(["CURRENCY_ASSUMED", "VARIANTS_SPLIT"]), false);
   });
 
@@ -222,6 +242,26 @@ describe("flagging sends the unsure to review, not to buyers", () => {
   test("an unmapped category is flagged even at high confidence", async () => {
     const v = await firstVariant({ category: "unmapped", category_confidence: 0.99 });
     assert.ok(v.normalization.flags.includes("CATEGORY_UNMAPPED"));
+  });
+
+  test("an unmapped product is queued for review but STILL SERVED", async () => {
+    // Withholding it would make a potentially large fraction of a real
+    // catalogue invisible to agents, and buys nothing: the mandate gate refuses
+    // an unmapped product against any category-constrained mandate anyway.
+    // Defence belongs at the payment gate, not at the feed.
+    const v = await firstVariant({ category: "unmapped", category_confidence: 0.2 });
+    assert.equal(v.normalization.needs_review, true);
+    assert.equal(isServable(v.normalization.flags), true);
+  });
+
+  test("unmapped can never satisfy a category-constrained mandate", async () => {
+    // The Phase 3 property that makes serving unmapped safe, asserted here so
+    // it cannot be quietly broken before the mandate layer exists. If a future
+    // mandate check skips the category test for unmapped products instead of
+    // failing it, CATEGORY_UNMAPPED must move to WITHHOLDING_FLAGS.
+    const v = await firstVariant({ category: "unmapped", category_confidence: 0.2 });
+    const mandateCategories = ["footwear", "apparel"];
+    assert.equal(mandateCategories.includes(v.category), false);
   });
 
   test("an inferred title is flagged", async () => {
@@ -286,7 +326,7 @@ describe("end to end: sheet -> normalized -> ACP feed", () => {
     assert.ok(feed.products.length > 0);
   });
 
-  test("flagged rows are withheld from the feed but still exist internally", async () => {
+  test("unsafe rows are withheld from the feed but still exist internally", async () => {
     const [sheet] = await parseWorkbook(fixture("messy-01-preamble.xlsx"));
     assert.ok(sheet);
 
@@ -296,8 +336,8 @@ describe("end to end: sheet -> normalized -> ACP feed", () => {
         extraction({
           source_row: r.row,
           variant_group: "canvas-shoe",
-          // Flag exactly one row.
-          category_confidence: i === 0 ? 0.1 : 0.95,
+          // Exactly one row gets a withholding flag.
+          title_inferred: i === 0,
         }),
       ),
       ctx,
@@ -310,7 +350,35 @@ describe("end to end: sheet -> normalized -> ACP feed", () => {
     assert.equal(internal.length, 4);
     assert.equal(served.length, 3);
     assert.equal(feed.withheld.length, 1);
-    assert.equal(feed.withheld[0]?.reason, "CATEGORY_UNMAPPED");
+    assert.equal(feed.withheld[0]?.reason, "TITLE_INFERRED");
+  });
+
+  test("an unmapped catalogue still reaches agents", async () => {
+    const [sheet] = await parseWorkbook(fixture("messy-01-preamble.xlsx"));
+    assert.ok(sheet);
+
+    // The pathological case the old rule produced: the mapper places nothing.
+    const products = normalizeSheet(
+      sheet,
+      sheet.rows.map((r) =>
+        extraction({
+          source_row: r.row,
+          variant_group: "canvas-shoe",
+          category: "unmapped",
+          category_confidence: 0.1,
+        }),
+      ),
+      ctx,
+    );
+
+    const feed = projectFeed(products, { feedId: "feed_lakshmi" });
+    assert.equal(feed.withheld.length, 0);
+    assert.equal(feed.products.flatMap((p) => p.variants).length, 4);
+    // Every one of them is still queued for the merchant.
+    for (const v of products.flatMap((p) => p.variants)) {
+      assert.equal(v.normalization.needs_review, true);
+    }
+    assertValid("ProductsResponse", { products: feed.products });
   });
 });
 

@@ -84,33 +84,52 @@ type NormalizationFlag =
   | "PRICE_OUT_OF_BAND";     // outside ₹1 .. ₹10,00,000, see §4
 ```
 
-Nothing with `needs_review: true` is served in the feed. It surfaces in the
-merchant dashboard for confirmation. **Never silently guess into the feed.**
+A record carrying a **withholding** flag is never served in the feed. Anything
+with `needs_review: true` surfaces in the merchant dashboard for confirmation —
+which is not the same set. **Never silently guess into the feed.**
 
-A `Product` whose every `Variant` is flagged is itself withheld. A `Product`
-with a mix serves only its clean variants — ACP requires `variants` to be
+A `Product` whose every `Variant` is withheld is itself withheld. A `Product`
+with a mix serves only its servable variants — ACP requires `variants` to be
 present, so a product cannot ship empty.
 
-### Blocking vs advisory flags
+### Flags answer two questions, not one
 
-`needs_review` is set by **blocking** flags only. Flags divide by what they
-assert:
+"Held for merchant review" and "withheld from the feed" are **different
+things**. Collapsing them into one boolean means the only way to ask a merchant
+about a product is to make it invisible to buyers first — a bad trade for
+anything short of genuinely unsafe. Three tiers:
 
-| | Flags | Meaning |
-|---|---|---|
-| **Blocking** | `MISSING_REQUIRED_FIELD`, `PRICE_AMBIGUOUS`, `PRICE_OUT_OF_BAND`, `CATEGORY_UNMAPPED`, `TITLE_INFERRED` | *We are not sure this is right.* Withheld from the feed, sent to review. |
-| **Advisory** | `CURRENCY_ASSUMED`, `VARIANTS_SPLIT`, `MULTILINGUAL_SOURCE` | *Something we did, or something about the source.* Carried on the record and shown in review; does not gate publication. |
+| Tier | Flags | Served to agents | In the review queue |
+|---|---|---|---|
+| **Withholding** | `MISSING_REQUIRED_FIELD`, `PRICE_AMBIGUOUS`, `PRICE_OUT_OF_BAND`, `TITLE_INFERRED` | no | yes |
+| **Review-only** | `CATEGORY_UNMAPPED` | **yes** | yes |
+| **Advisory** | `CURRENCY_ASSUMED`, `VARIANTS_SPLIT`, `MULTILINGUAL_SOURCE` | yes | no |
 
-This is not a softening. Treating every flag as blocking empties the feed —
-`CURRENCY_ASSUMED` fires on any plain-number price, which is nearly every row of
-nearly every real sheet — and a review queue holding every product is one the
-merchant rubber-stamps, which destroys the check it exists to provide. The
-reasoning per flag is in `lib/normalize/flags.ts`; the failure that forced it is
+Withholding is for wrong-in-an-unrecoverable-way: a bad price is charged against
+a mandate ceiling, a fabricated title makes an agent buy the wrong object.
+
+`CATEGORY_UNMAPPED` is served on purpose. Withholding it would make a
+potentially large fraction of a real catalogue invisible to agents and would buy
+nothing — mandate verification matches on `category` only (`DESIGN.md` §3), so an
+`unmapped` product can never satisfy a category-constrained mandate. It is
+refused at the payment gate by construction. Withholding at feed time is defence
+in the wrong layer.
+
+> **Phase 3 inherits a requirement.** The mandate category check must treat
+> `unmapped` as matching **nothing**. If it is ever written as "skip the category
+> test when the product is unmapped", this tier becomes unsafe and
+> `CATEGORY_UNMAPPED` must move to withholding. A test pins the property today.
+
+None of this is a softening. Treating every flag as withholding empties the feed
+— `CURRENCY_ASSUMED` fires on any plain-number price, which is nearly every row
+of nearly every real sheet — and a review queue holding every product is one the
+merchant rubber-stamps, which destroys the check it exists to provide. Per-flag
+reasoning is in `lib/normalize/flags.ts`; the failures that forced this shape are
 in `OBSTACLES.md`.
 
-A withheld record's logged reason names **blocking flags only**. A record held
-for `CATEGORY_UNMAPPED` must not be logged as
-`CURRENCY_ASSUMED,CATEGORY_UNMAPPED` — that reason code names a non-cause, and
+A withheld record's logged reason names **withholding flags only**. A record
+held back for `PRICE_AMBIGUOUS` must not be logged as
+`CURRENCY_ASSUMED,PRICE_AMBIGUOUS` — that reason code names a non-cause, and
 `CLAUDE.md` invariant 3 asks for one that is true.
 
 ### 1.1 Outbound projection to the ACP feed
@@ -134,7 +153,7 @@ slot and no extension mechanism that reaches feeds (verified — see
 | `Variant.compare_at_price` | `Variant.list_price` | |
 | `Variant.category` | `Variant.categories[0]` | `{value, taxonomy: "agentready"}` — `taxonomy` is a free string, so our fixed enum is legal as its own named taxonomy |
 | `Variant.category_raw` | `Variant.categories[1]` | `{value: raw, taxonomy: "merchant"}` — verbatim preservation is spec-native here |
-| `Variant.availability` | `Variant.availability` | `{available: bool, status: string}`. ACP has no `"unknown"`; `unknown` implies `needs_review` and therefore never ships |
+| `Variant.availability` | `Variant.availability` | `{available: bool, status: string}`. ACP has no `"unknown"`; the normalizer flags it `MISSING_REQUIRED_FIELD`, which withholds, so it never ships |
 | `Variant.options` | `Variant.variant_options[]` | `{name, value}` — colour/size only |
 | `Variant.image_url` | `Variant.media[0]` | |
 
@@ -170,7 +189,9 @@ type Category =
 
 Rules:
 - Below a confidence threshold → `"unmapped"` + `CATEGORY_UNMAPPED` +
-  `needs_review: true`. **Do not force-fit.**
+  `needs_review: true`. **Do not force-fit.** The product is still *served* —
+  review-only, not withheld; see §1. It cannot satisfy a category-constrained
+  mandate, so the payment gate refuses it there instead.
 - `category_raw` always preserved verbatim, whatever the sheet said.
 - Mandate category matching operates on `category` only, never on
   `category_raw` and never via a model call at payment time.
@@ -232,6 +253,13 @@ and produces a plausible wrong value, which is worse than a crash — especially
 on the money path, where a plausible wrong number is compared against a mandate
 ceiling and charged.
 
+**Tests derived from a rule cannot falsify the rule.** A unit test written from
+an assumption agrees with the assumption. Every rule needs at least one
+end-to-end assertion against a fixture built from real-world shape rather than
+from the rule. The `needs_review` rule below had a passing unit test and still
+left the feed permanently empty; what caught it was running the whole pipeline
+against a sheet whose prices are plain numbers. See `OBSTACLES.md`.
+
 ---
 
 ## 5. Accuracy measurement — do not skip
@@ -251,8 +279,9 @@ it must never be hand-tuned to look better.
 
 ## 6. Feed
 
-Serve products where `needs_review === false`, conforming to the ACP Product
-Feed Spec at `2026-04-17`. Field mapping is fixed in §1.1 — do not re-guess it.
+Serve products carrying no **withholding** flag (§1) — not `needs_review === false`,
+which is a different and smaller set — conforming to the ACP Product Feed Spec
+at `2026-04-17`. Field mapping is fixed in §1.1 — do not re-guess it.
 
 **Transport deviation, stated up front.** In ACP the Product Feed API is hosted
 by the *agent*; merchants push to it (`POST /feeds`,
