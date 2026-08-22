@@ -1,0 +1,22 @@
+# Local agent context — not part of the judged artifact
+CLAUDE.md
+
+# Secrets. Razorpay test keys included: CLAUDE.md invariant 5, no live keys ever.
+.env
+.env.*
+!.env.example
+
+# Real merchant spreadsheets, contributed with permission. DESIGN.md §9.
+# Synthetic fixtures (fixtures/messy-*) are committed; these are not.
+fixtures/real-*
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+coverage/
+
+# OS
+.DS_Store
