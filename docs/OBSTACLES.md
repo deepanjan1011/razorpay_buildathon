@@ -1355,3 +1355,67 @@ nothing about how strictly it validates data. Recorded because the false version
 would have been believed: a note in this file saying "the ACP checkout schema is
 malformed" is exactly the kind of confident wrong statement the false-reason-code
 entries are about, just aimed at someone else's work instead of our own.
+
+---
+
+## 2026-08-22 — ACP `Item` has no `quantity`, and its own description says it does
+
+Building `POST /checkout_sessions` against the pinned schema turned up a
+contradiction inside a single definition.
+
+`schema.agentic_checkout.json` `$defs.Item`:
+
+```json
+{
+  "description": "A purchasable item with variant options (e.g., size, color) and quantity",
+  "additionalProperties": false,
+  "properties": { "id": {...}, "name": {...}, "unit_amount": {...} },
+  "required": ["id"]
+}
+```
+
+The description promises **quantity**. The properties do not contain it, and
+`additionalProperties: false` forbids adding it. So `{"id": "x", "quantity": 2}`
+— which is exactly what `rfc.product_feeds.md` §4.3's own worked example sends —
+**fails validation against the checkout schema of the same dated release.**
+
+Unlike the ajv `strictRequired` case a few entries up, this one is not a
+misreading on our side. It is checkable in one object: description and
+properties disagree, and the RFC example contradicts the schema.
+
+**Resolution: follow the schema, because the schema is what validates.**
+Quantity is expressed by REPETITION — two of a thing is the id twice — and
+`aggregate()` folds repeats into a quantity. Asking for the same variant twice
+means two units, not two carts.
+
+Recorded rather than worked around silently, because an agent built from the
+RFC example will send `quantity` and get a 400, and whoever debugs that deserves
+to find this note.
+
+**Second thing the same exercise found**, less interesting but more embarrassing:
+`CheckoutSessionCreateRequest.required` is `["line_items", "currency",
+"capabilities"]`. I had built a create handler that demanded none of them,
+because I read the property list rather than the required list — the same
+mistake as the six session-shape errors two entries up. Reading a JSON Schema
+means reading `required` first.
+
+---
+
+## 2026-08-22 — Live over HTTP: checkout sessions
+
+Real server, real Neon, `curl`:
+
+```
+POST /checkout_sessions  (no Idempotency-Key)  -> idempotency_key_required
+POST /checkout_sessions  (id twice, qty 2)     -> ready_for_payment, unit 65000
+   totals: items 130000, subtotal 130000, delivery 0, tax 6500, total 136500
+   handler: in.agentready.razorpay_payment_link
+POST same key, same body                       -> 201, Idempotent-Replay: true
+POST same key, DIFFERENT body                  -> idempotency_conflict
+GET  /checkout_sessions/{id}                   -> 200
+POST /checkout_sessions/{id}/cancel            -> canceled
+```
+
+Delivery is 0 because the cart crosses the ₹1,000 free threshold, and the total
+equals its own components. The quantity of 2 came from repeating the id, which
+is the reading forced by the schema above.
