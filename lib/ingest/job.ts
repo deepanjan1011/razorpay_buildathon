@@ -220,7 +220,14 @@ export async function runJob(
   options: RunOptions = {},
 ): Promise<JobProgress> {
   await sql.query(
-    `update ingest_job set status = 'running', updated_at = now() where id = $1`,
+    // The reason columns are cleared with the status, not separately. A job
+    // being retried carries no CURRENT failure, and leaving the previous
+    // attempt's reason attached would make the record assert a live failure
+    // that is no longer true. `job_only_failed_has_reason` enforces it.
+    `update ingest_job
+        set status = 'running', updated_at = now(),
+            reason_code = null, reason_human = null
+      where id = $1`,
     [id],
   );
 

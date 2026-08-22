@@ -13,10 +13,23 @@
  */
 import _Ajv2020 from "ajv/dist/2020.js";
 import _addFormats from "ajv-formats";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { ACP_API_VERSION } from "./acp.ts";
+
+/**
+ * The pinned schema is IMPORTED, not read from disk.
+ *
+ * It was `readFileSync(join(import.meta.dirname, …))`, which works under Node
+ * and breaks the moment a bundler touches it: `import.meta.dirname` is
+ * undefined inside a Next route bundle, and the build failed with "path must be
+ * of type string". Nothing in the test suite could have caught that — the
+ * validator is exercised constantly, but only ever under plain Node.
+ *
+ * An import is also a stronger pin. The schema is part of the module graph
+ * rather than a file that has to still exist, at the right relative path, at
+ * runtime.
+ */
+import schemaBundle from "../../spec/acp/2026-04-17/schema.feed.json" with { type: "json" };
 
 // ajv ships CommonJS with `export =`. Node's interop resolves the callable at
 // runtime, but TypeScript sees the namespace under nodenext + verbatim module
@@ -24,18 +37,7 @@ import { ACP_API_VERSION } from "./acp.ts";
 const Ajv2020 = _Ajv2020 as unknown as typeof _Ajv2020.default;
 const addFormats = _addFormats as unknown as typeof _addFormats.default;
 
-const SCHEMA_DIR = join(
-  import.meta.dirname,
-  "..",
-  "..",
-  "spec",
-  "acp",
-  ACP_API_VERSION,
-);
-
-const bundle = JSON.parse(
-  readFileSync(join(SCHEMA_DIR, "schema.feed.json"), "utf8"),
-) as { $id: string };
+const bundle = schemaBundle as unknown as { $id: string };
 
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 addFormats(ajv);

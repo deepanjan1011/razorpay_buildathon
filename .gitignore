@@ -23,3 +23,7 @@ coverage/
 
 # Local feed artifacts — regenerated from a sheet, not source
 .data/
+
+# Next build output
+.next/
+next-env.d.ts

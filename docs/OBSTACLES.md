@@ -1011,3 +1011,83 @@ database and still be impossible to finish — the headers it needs to locate th
 price and stock columns lived only in memory. Migration `002` stores the sheet
 name and headers on the job. Resumability that depends on a process staying
 alive is not resumability.
+
+---
+
+## 2026-08-22 — Audit for the (state, explanation) shape, before Phase 3 needs it
+
+**Why now.** A false reason code has surfaced twice by different routes: a
+withheld record logged with a flag that was not the cause, and a retried batch
+still carrying its previous failure. Both were the same shape — **a STATE field
+and an EXPLANATION field encoding one fact between them, updatable
+independently, free to contradict each other.** Phase 3's audit log makes
+reason codes load-bearing (`CLAUDE.md` invariant 3), so the shape was audited
+deliberately rather than waited on.
+
+**Found: one live instance of the same bug.** `runJob` set
+`ingest_job.status = 'running'` at the start without clearing `reason_code`, so
+a job that had failed and was being retried was RUNNING while still asserting
+`INGEST_BATCHES_FAILED — 1 of 3 batches failed`. `GET /api/ingest/{jobId}`
+exposes that field. Fixed, and forbidden in SQL by
+`job_only_failed_has_reason` (migration 004), matching the batch constraint that
+caught the first one.
+
+**Found: two derived-vs-stored pairs, both currently consistent, now pinned.**
+
+- `Normalization.flags` and `needs_review`. `needs_review` is stored rather than
+  computed on read, so it is a second field encoding what the flags already say.
+  It is only ever produced by `normalization()`, but nothing enforced that — a
+  test now runs four fixtures through the pipeline and asserts
+  `needs_review === needsReview(flags)` for every product and variant.
+- `availability` and `inventory_count`. A positive count with `out_of_stock`, or
+  a count attached to `unknown`, would be a contradiction. `parseStock` sets both
+  together and cannot produce one; a test pins it across fifteen inputs.
+
+**The rule this produces.** Where the two fields live in the database, forbid the
+disagreement with a check constraint — every writer has to go through it, and
+the constraint has now caught two bugs that code review did not. Where they live
+in TypeScript, derive one from the other in a single function and assert the
+agreement in a test.
+
+---
+
+## 2026-08-22 — `import.meta.dirname` is undefined once a bundler touches it
+
+**Hit** on the first `next build`, after 184 green tests:
+
+> `Failed to collect page data for /api/feeds/[feedId]/products`
+> `TypeError: The "path" argument must be of type string. Received undefined`
+> `at lib/feed/validate.ts:27` — `join(import.meta.dirname, "..", "..")`
+
+The validator loaded the pinned ACP schema with `readFileSync` off
+`import.meta.dirname`. That works under plain Node — which is the only way the
+test suite ever runs it — and is undefined inside a Next route bundle.
+
+**Fix.** Import the schema as JSON instead. No filesystem at runtime, and a
+stronger pin: the schema becomes part of the module graph rather than a file
+that must still exist at the right relative path when the route executes.
+
+**Worth noting for the pattern collection.** The validator is one of the
+most-exercised pieces of code in the repo, and no test could have caught this,
+because every test runs it under Node. "Green suite, breaks in the real
+environment" — the same shape as the others in this file, with the environment
+rather than the data being the thing the suite did not vary.
+
+---
+
+## 2026-08-22 — Live over HTTP: `/upload` → job → feed
+
+Real server, real Neon, real Gemini, `curl` rather than direct function calls:
+
+```
+GET /upload -> 200
+POST /api/ingest -> job_0ab5a7e1649c9f85
+  poll: running 0/4 → running 4/4 → complete 4/4
+GET /api/feeds/feed_http/products -> 200, ACP-shaped
+GET /api/feeds/nope/products -> {"type":"invalid_request","code":"feed_not_found",…}
+```
+
+First time the route handlers served over the network rather than being called
+as functions. Nothing new broke, which is worth recording precisely because the
+bundler bug above shows that "called as a function in a test" and "served by the
+framework" are different environments.
