@@ -1271,3 +1271,87 @@ delivery — which is the Phase 1 lesson about environments applied in advance.
 Checkout sessions and authoritative cart state first — pure ACP, no Razorpay,
 no payment. That half is fully specified and testable today. The payment leg
 last, because every open question above lives in it.
+
+---
+
+## 2026-08-22 — "Authoritative" needs two storage locations, not one
+
+Building checkout sessions surfaced a structural point that is easy to get
+wrong and impossible to fix later.
+
+`rfc.product_feeds.md` §3.3 says feed data is a **signal** and the checkout
+response is **authoritative**. If checkout prices carts by reading the published
+feed artifacts, that sentence is decoration: both sides read the same bytes, so
+they can never disagree, and Phase 5's drift scenario — agent quotes ₹2,799,
+checkout says ₹2,999 — would have to be *faked* in a test rather than produced.
+
+So there are now two stores. `catalog_variant` is the live truth that checkout
+reads at request time; the feed artifacts are a snapshot taken at publish. Drift
+becomes a real state of the system (`setPrice` moves one and not the other) and
+the Phase 5 path can be demonstrated rather than simulated.
+
+The same reasoning applies to retrieval. `GET /checkout_sessions/{id}`
+**re-prices from the catalogue** rather than replaying the stored snapshot,
+because a GET that returns a price we no longer honour is exactly what "checkout
+is authoritative" is supposed to rule out. Terminal sessions are the deliberate
+exception: a completed or cancelled session is a historical record and must not
+change under a reader. A test moves the price by ₹4,100 under a cancelled
+session and asserts it does not budge.
+
+---
+
+## 2026-08-22 — The checkout schema rejected six things I believed were right
+
+`CheckoutSessionBase` requires more than reading the prose suggests:
+`id, status, currency, line_items, totals, fulfillment_options, messages, links,
+capabilities` — and `LineItem` requires its OWN `totals` while both it and
+`Item` set `additionalProperties: false`.
+
+My first session object had none of `fulfillment_options`, `links` or
+`capabilities`, gave line items no `totals`, and carried a convenient
+`total_amount` on each line that is simply not a LineItem field. Six violations,
+all caught by validating a real session against the pinned schema — none of
+which careful reading had caught, because I had read the OpenAPI's *property
+list* and not its *required list*.
+
+`PaymentHandler` then required five more: `version`, `spec`, `config_schema`,
+`instrument_schemas`, `config`. Two of those are `format: uri` and the project
+has no published domain, so they point at a placeholder that is **declared as a
+placeholder in the code** and must be repointed before submission. A required
+URI field cannot be omitted; the choice was between an honest placeholder and a
+plausible URL that quietly 404s.
+
+**One real bug fell out of the same run.** A test asserting that an unpriceable
+cart totals zero failed with `5250`: with no line items the subtotal is 0, which
+is below the free-delivery threshold, so the flat ₹50 applied and 5% tax was
+charged on it. **An empty cart was billing ₹52.50 of delivery and tax on
+nothing.** The threshold rule had been written for a cart that exists.
+
+---
+
+## 2026-08-22 — A near-miss: ajv's strictness is not the spec's
+
+Worth recording because I nearly wrote down a false finding.
+
+Compiling the checkout schema threw:
+`strict mode: required property "token" is not defined at "#/anyOf/0"`. My first
+reading was "another defect in the published schema", which would have gone into
+this file next to the genuine `UpsertProductsResponse` gap from Phase 1.
+
+Checking first showed the opposite. The construct is:
+
+```json
+"anyOf": [ { "required": ["handler_id", "instrument"] },
+           { "required": ["purchase_order_number"] } ]
+```
+
+That is valid, idiomatic JSON Schema for "one of these must be present", with
+the shapes defined on the parent. `strictRequired` is an **ajv lint** that
+assumes every `required` sits beside its own `properties` — a style preference,
+not a rule. The schema is fine; our validator configuration was wrong.
+
+Disabling that one lint makes the validator accept the schema and changes
+nothing about how strictly it validates data. Recorded because the false version
+would have been believed: a note in this file saying "the ACP checkout schema is
+malformed" is exactly the kind of confident wrong statement the false-reason-code
+entries are about, just aimed at someone else's work instead of our own.
