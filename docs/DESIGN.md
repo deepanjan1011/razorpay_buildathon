@@ -99,9 +99,15 @@ exactly the path invariant 4 opens by allowing capped retries on transport
 failure.
 
 So we own it: a table keyed on the incoming ACP `Idempotency-Key`, storing the
-resulting `razorpay_order_id`, consulted before any call is made. Our key also
-goes into Razorpay's `receipt` field (unique, ≤40 chars) so the two systems can
-be reconciled from their dashboard. Same shape as the ingest batch claim — a
+resulting response, consulted before any call is made.
+
+Reconciliation between the two systems runs on the **session id**, which
+`complete` sets as the Payment Link's `reference_id` (unique per link, ≤40
+chars; `cs_` + 24 hex fits). It surfaces on the order as its `receipt` and comes
+back on every webhook. Razorpay enforces that uniqueness itself, which is a
+second line of defence worth naming: if we ever retried a link creation for a
+session that already has one, Razorpay refuses the duplicate rather than
+minting a second payable URL. Same shape as the ingest batch claim — a
 conditional insert, not a lock.
 
 Verified against Razorpay's live documentation, `docs/OBSTACLES.md`.
@@ -164,8 +170,22 @@ both yielding a URL a person opens. So the flow is:
 
 1. Agent drives the session to `ready_for_payment` against authoritative cart
    state.
-2. `complete` creates a Razorpay order and a payment link, and returns the link
-   as the handler's credential token. **No charge has occurred.**
+2. `complete` creates a Razorpay **Payment Link** and returns its URL. **No
+   charge has occurred.**
+
+   Corrected after building it: this is ONE call, not two. A Payment Link
+   creates its own order and the create request takes no `order_id`, so
+   "create an order, then a link for it" would produce a second, unrelated
+   order that nothing ever pays. The order id is not in the create response
+   either — it arrives with the webhook, which is why `razorpay_order_id` is
+   nullable (`migrations/006_payment_link.sql`).
+
+   The URL is returned as `order.permalink_url`, NOT in `links[]`. `Link.type`
+   is a closed enum of policy pages — `terms_of_use`, `privacy_policy`, … —
+   with `additionalProperties: false`, so the session's `links` array has no
+   slot for a payment URL and cannot be given one. The response is a
+   `CheckoutSessionWithOrder`, and `order.id` is the Payment Link id, because
+   that is the object that actually exists at this point in the flow.
 3. A human completes payment at that link.
 4. The webhook moves our order to paid, HMAC-verified, idempotent per event id.
 
@@ -324,6 +344,29 @@ construction, and hiding it from discovery as well would cost catalogue coverage
 for no added safety. This requires the mandate category check to treat
 `unmapped` as matching nothing — if that ever changes, unmapped products must be
 withheld. See `docs/PHASE-1.md` §1 and §2.
+
+### Two clocks over one purchase — decide this before writing Phase 3
+
+Phase 2 set a clock: a payment link lives 30 minutes, and `expired` is derived
+from it on read. Phase 3 will set a second one: a mandate has an expiry, and
+invariant 2 checks it.
+
+**Two independent deadlines over a single purchase is a defect waiting for an
+intersection.** A mandate valid for an hour against a link valid for thirty
+minutes is a purchase that is authorised and unpayable. The reverse — a link
+outliving its mandate — is worse: a URL a human can still pay after the
+authority to charge them has lapsed.
+
+Decide which clock dominates rather than discovering it at the boundary. The
+likely answer is that **the mandate is the ceiling and the link is derived from
+it** (`expire_by = min(now + 30m, mandate.expires_at)`), because the mandate is
+the thing that carries authority and the link is an artifact we mint. But it is
+a decision with an audit consequence — a link truncated by a mandate expiry has
+a different reason code from one that simply ran out — so it is written here to
+be settled deliberately.
+
+Whatever is chosen, there must remain exactly ONE stored instant that a read can
+answer from, as there is now.
 
 ### Refusals must be SPECIFIC, not loose — read before writing Phase 3
 

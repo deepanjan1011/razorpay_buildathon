@@ -167,6 +167,13 @@ another holds a claim; does a crashed caller's claim still expire.
 This is a gate, not a suggestion. The failure is silent — duplicate API calls
 against a five-per-minute budget, and duplicate products under shifting ids.
 
+**Phase 3 — two clocks over one purchase.** Phase 2 gave a payment link a
+30-minute deadline. A mandate has its own expiry. Decide which dominates BEFORE
+writing the mandate check, not at the intersection: a mandate outliving its link
+is an authorised purchase nobody can pay, and a link outliving its mandate is a
+URL a human can still pay after the authority to charge them lapsed. See
+`docs/DESIGN.md` §3.
+
 **Phase 3 — refusals must be specific, not loose.** See `docs/DESIGN.md` §3.
 Every mandate check is a withholding rule, and the Phase 1 lesson does not
 transfer: on the money path the cautious default is correct, so the answer is

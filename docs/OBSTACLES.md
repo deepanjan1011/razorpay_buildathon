@@ -1422,7 +1422,7 @@ is the reading forced by the schema above.
 
 ---
 
-## 2026-08-23 — The webhook, written before `complete`, and five things the real payloads said
+## 2026-08-23 — Reading the payload beats reading the docs: five findings no careful reading produces
 
 Built the Razorpay webhook first, ahead of `POST /checkout_sessions/{id}/complete`,
 because it is the only endpoint an unauthenticated stranger can call and a
@@ -1430,10 +1430,24 @@ security boundary that waits for the deadline gets the attention a deadline
 allows. The signature check is a pure function over `(rawBody, signature,
 secret)`, so it is exercised without a database, a live PSP, or a payment.
 
-The payloads were transcribed verbatim from Razorpay's published samples into
-`fixtures/razorpay/` **before the parser existed**. Five things in them that a
-hand-written fixture would not have contained — which is the entire argument for
-transcribing rather than authoring:
+**This entry is the fixtures rule paying off in a domain it was not written
+for.** The rule came out of spreadsheets — *fixtures are written from observed
+real-world data, before the code that parses them* — and the reason it earns its
+place in `CLAUDE.md` is on display below: five findings, and **not one of them is
+available by reading the documentation carefully.** They are only available by
+looking at what the system actually emits.
+
+The prose says the event has an id. It does — in a header, with nothing in the
+body. The prose describes `notes` as a key-value map. It is, in one of the three
+real samples; in the others it is an empty array and a null. The prose says
+`expire_by` is a timestamp. It is, except when it is `0` meaning unset. No amount
+of care applied to the sentences produces any of that, because the sentences are
+not wrong — they are *incomplete in ways only the artifact reveals*. Careful
+reading produces a parser that agrees with the documentation, and the
+documentation is not what will be sent to us at 3am.
+
+The payloads were therefore transcribed verbatim from Razorpay's published
+samples into `fixtures/razorpay/` **before the parser existed**. What that bought:
 
 1. **The event id is not in the body.** It is the `x-razorpay-event-id` HEADER.
    None of the three real payloads carries an `id` or `event_id` field at all.
@@ -1472,17 +1486,28 @@ concurrent checkout retries arbitrates concurrent webhook redeliveries, and it
 is already raced by a test. Four concurrent redeliveries produce exactly one
 non-duplicate.
 
-### The typechecker found the state that had no name
+### A sixth finding of the same shape, from a different layer
 
 `SessionStatus` in `session.ts` listed five states; the database check
 constraint carries the full ACP enum. Adding `expired` to `isTerminal()` made
 `status === "expired"` a **type error in three files** — TS2367, "these types
-have no overlap" — because the union did not contain it. The tests had all
-passed: types are erased at runtime, and PGlite accepted the string happily.
+have no overlap" — because the union did not contain it. Every test had passed:
+types are erased at runtime, and PGlite accepted the string happily.
 
-A green suite said yes and `npm run typecheck` said no. This is the CLAUDE.md
-"one environment says nothing about a second one" rule paying for itself in the
-smallest possible way.
+This is not a separate lesson from the five above. It is the same one seen from
+the layer axis rather than the data axis, and it joins a family this project now
+has three members of:
+
+| What was held constant | What varied it | What it found |
+|---|---|---|
+| the data (fixtures we authored) | real published payloads | five parse assumptions |
+| the runtime (plain Node) | `next build` | `import.meta.dirname` undefined in a bundle |
+| the checker (the test runner) | `tsc --noEmit` | a state with no name in the type |
+
+Every one of them was green before it was varied. **The question that finds
+these is not "is there another test to write" — it is "what does every existing
+test hold constant".** More tests along the same axis would have found none of
+the three.
 
 ### Verified live over HTTP against Neon
 
@@ -1520,3 +1545,113 @@ team wrote deserves to be a decision rather than a surprise.
 
 Also added `dev` and `build` scripts, whose absence meant `npm run build` — the
 one check that runs the code in the bundler it ships in — was not runnable.
+
+---
+
+## 2026-08-23 — `complete`: one API call, not two, and a 502 that only a real request could find
+
+### A Payment Link creates its own order
+
+DESIGN.md §2 said `complete` "creates a Razorpay order and a payment link".
+Building it showed that is not a thing the API does. **A Payment Link creates its
+own order**, and the create request takes no `order_id` — so "create an order,
+then create a link for it" produces a second, unrelated order that nothing ever
+pays, and two ids to reconcile where there should be one.
+
+The order id is not in the create response either. It arrives with the webhook,
+as `payload.order.entity` — which is why `razorpay_order_id` is nullable in
+`migrations/006_payment_link.sql` and stays null until someone pays.
+
+So `complete` makes exactly one call. DESIGN.md §2 corrected in the same commit,
+because a design document that describes a flow the API cannot perform is worse
+than no design document.
+
+### `links[]` cannot carry the payment URL
+
+The obvious place to return a payment link is the session's `links` array. It
+cannot go there: `Link.type` is a **closed enum of policy pages** —
+`terms_of_use`, `privacy_policy`, `return_policy`, `shipping_policy`,
+`contact_us`, `about_us`, `faq`, `support` — with `additionalProperties: false`.
+There is no `payment` member and no room to add one.
+
+It goes in `order.permalink_url` on a `CheckoutSessionWithOrder`, and `order.id`
+is the Payment Link id, because at that moment the link is the only object that
+exists in Razorpay. The response is validated against `CheckoutSessionWithOrder`
+rather than `CheckoutSession` — the latter would pass a response with no order
+in it at all.
+
+### The 502 that swallowed every refusal
+
+`complete`'s route called `completeSession(sql, id, body, razorpayClient())`.
+`razorpayClient()` validated `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` at
+construction and threw when they were missing. The throw is in the **argument**,
+so it happened before any policy ran — and on a machine with no Razorpay keys,
+which is this one:
+
+```
+wrong handler_id  -> 502 payment_link_unavailable   (should be 400)
+out of stock      -> 502 payment_link_unavailable   (should be 409)
+cancelled session -> 502 payment_link_unavailable   (should be 409)
+```
+
+Every refusal came back as "could not create a payment link", which is wrong
+about what happened and wrong about whose fault it is. An agent debugging its own
+malformed `payment_data` would have been told the seller's PSP was down.
+
+**Twenty-six unit tests did not see it**, and could not have: the fake client
+never throws, and the failure was in constructing the real one. One real HTTP
+request found it immediately. Fixed by moving the configuration check inside
+`create()`, where it fires only on the path that actually needs a key — and the
+regression test now uses a client whose `create` throws, which is the thing the
+old fake could not express.
+
+This is the same family as the three in the entry above, and the fourth member of
+it: **the suite held the client constant.**
+
+### An unresolved idempotency claim wedges the key forever
+
+The claim is inserted with `response_status = 0` and updated when the response is
+known. If the Razorpay call throws, nothing updates it — and every retry of that
+key then reads status 0 and returns `idempotency_in_flight`. The request wedges
+itself permanently, which is a worse failure than the one it is reporting.
+
+Resolved by committing the 502 into the record rather than releasing it. A retry
+with the same key replays the 502; a genuine new attempt takes a new key, which
+is what invariant 4 means by no blind retry. Releasing the claim instead would
+have allowed a second link if the first call had in fact succeeded before the
+failure.
+
+### A GET was resetting `complete_in_progress` back to `ready_for_payment`
+
+`getSession` re-prices on every read and persisted `priceCart`'s status. That
+status is computed from the catalogue alone, so for a session with a live payment
+link it is `ready_for_payment` — and a plain GET during the pending window
+quietly un-completed the session, after which a second `complete` was allowed.
+
+Prices refresh on read; **the lifecycle status is not the catalogue's to set.**
+Found by a test asserting a GET in the pending window, not by reading the
+function — the read path had been correct for every status that existed when it
+was written.
+
+`updateSession` had the same shape of hole and now refuses with
+`session_pending_payment`: editing a cart under a live link would leave a payable
+URL at an amount the cart no longer agrees with.
+
+### Verified live over HTTP against Neon
+
+```
+create session                          -> 201 ready_for_payment, total 73500
+complete, handler dev.acp.tokenized.card-> 400 unsupported_payment_handler
+complete, no payment_data               -> 400 invalid_request ($. param)
+complete, handler razorpay_link         -> 502 payment_link_unavailable
+complete, same Idempotency-Key again    -> 502 replayed (not wedged in_flight)
+complete, out-of-stock cart             -> 409 session_not_ready_for_payment
+cancel, then complete                   -> 409 session_terminal
+```
+
+The 502 on the correct handler is the honest result on this machine: **there are
+no Razorpay keys in `.env`, and there never have been.** Which means the part of
+`complete` that spends money — the Payment Link create request — **has never
+run.** Its request body is an assumption, not code. Everything up to it is
+verified; the call itself is not, and no green suite here should be read as
+saying otherwise. It needs a test-mode key before Phase 2's gate is met.

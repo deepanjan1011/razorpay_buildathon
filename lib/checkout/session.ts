@@ -286,14 +286,43 @@ type StoredRow = {
   merchant_id: string;
   status: SessionStatus;
   requested: RequestedItem[];
+  link_expires_at: Date | null;
 };
 
 async function load(sql: Sql, id: string): Promise<StoredRow | null> {
   const { rows } = await sql.query<StoredRow>(
-    `select merchant_id, status, requested from checkout_session where id = $1`,
+    `select merchant_id, status, requested, link_expires_at
+       from checkout_session where id = $1`,
     [id],
   );
   return rows[0] ?? null;
+}
+
+/**
+ * Expiry is DERIVED FROM THE DEADLINE, not written by a job.
+ *
+ * A sweeper that exists only to set a status computable from a timestamp is a
+ * moving part with an outage mode: while it is down, expired sessions read as
+ * payable. This runs on the read that asks the question, so there is no window
+ * in which the answer is stale. `payment_link.expired` from Razorpay confirms
+ * it later; it is not what causes it (DESIGN.md §2).
+ *
+ * Conditional on the status we expect, so a session completed between the read
+ * and this write is not stamped expired over the top of a real payment.
+ */
+async function expireIfDue(sql: Sql, id: string, row: StoredRow, now: Date): Promise<boolean> {
+  if (row.status !== "complete_in_progress") return false;
+  if (!row.link_expires_at || row.link_expires_at > now) return false;
+
+  const { rows } = await sql.query<{ id: string }>(
+    `update checkout_session
+        set status = 'expired', updated_at = $2,
+            snapshot = jsonb_set(snapshot, '{status}', '"expired"')
+      where id = $1 and status = 'complete_in_progress'
+      returning id`,
+    [id, now],
+  );
+  return rows.length > 0;
 }
 
 /**
@@ -304,9 +333,16 @@ async function load(sql: Sql, id: string): Promise<StoredRow | null> {
  * supposed to rule out. Terminal sessions are the exception: a completed or
  * cancelled session is a historical record and must not change under a reader.
  */
-export async function getSession(sql: Sql, id: string): Promise<CheckoutSession | null> {
+export async function getSession(
+  sql: Sql,
+  id: string,
+  now: Date = new Date(),
+): Promise<CheckoutSession | null> {
   const row = await load(sql, id);
   if (!row) return null;
+
+  const expired = await expireIfDue(sql, id, row, now);
+  if (expired) row.status = "expired";
 
   if (isTerminal(row.status)) {
     const { rows } = await sql.query<{ snapshot: CheckoutSession }>(
@@ -317,7 +353,17 @@ export async function getSession(sql: Sql, id: string): Promise<CheckoutSession 
   }
 
   const { session } = await priceCart(sql, row.merchant_id, row.requested);
-  return persist(sql, id, row.merchant_id, row.requested, session, session.status, false);
+
+  // A READ MUST NOT UNDO `complete`. `priceCart` computes a status from the
+  // catalogue alone, and for a session with a live payment link that status is
+  // `ready_for_payment` — so a plain GET would quietly reset a session that is
+  // waiting for a human, and a second `complete` would then be allowed against
+  // it. Prices refresh; the lifecycle status is not the catalogue's to set.
+  //
+  // Found by a test asserting a GET during the pending window, not by reading
+  // this function.
+  const status = row.status === "complete_in_progress" ? row.status : session.status;
+  return persist(sql, id, row.merchant_id, row.requested, session, status, false);
 }
 
 /**
@@ -338,9 +384,26 @@ export async function updateSession(
   sql: Sql,
   id: string,
   patch: { line_items?: RequestedItem[]; buyer?: unknown; fulfillment_details?: unknown },
+  now: Date = new Date(),
 ): Promise<UpdateResult | null> {
   const row = await load(sql, id);
   if (!row) return null;
+
+  // A passed deadline makes the session terminal here too. Otherwise an agent
+  // could edit the cart behind a live-but-dead link and be told it worked.
+  if (await expireIfDue(sql, id, row, now)) row.status = "expired";
+
+  // A live payment link is a price quoted to a person. Editing the cart under
+  // it would leave the link payable at an amount the cart no longer says, which
+  // is the drift this design exists to refuse. Cancel and start again.
+  if (row.status === "complete_in_progress") {
+    return {
+      ok: false,
+      code: "session_pending_payment",
+      message:
+        "A payment link is live for this session; cancel it before changing the cart",
+    };
+  }
 
   // A terminal session is a record, not a workspace. Mutating one would rewrite
   // history that the audit log has already referenced.
@@ -360,9 +423,15 @@ export async function updateSession(
   };
 }
 
-export async function cancelSession(sql: Sql, id: string): Promise<UpdateResult | null> {
+export async function cancelSession(
+  sql: Sql,
+  id: string,
+  now: Date = new Date(),
+): Promise<UpdateResult | null> {
   const row = await load(sql, id);
   if (!row) return null;
+
+  if (await expireIfDue(sql, id, row, now)) row.status = "expired";
 
   if (row.status === "completed") {
     // Cancelling a completed session would mean money moved against a session

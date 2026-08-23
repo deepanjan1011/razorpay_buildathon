@@ -53,14 +53,18 @@ export function json(status: number, body: unknown, extra: Record<string, string
  * the violation beats a 200 teaching an agent the wrong shape — this is the
  * last moment anyone on our side can notice.
  */
-export function conformantSession(status: number, session: unknown): Response {
-  const errors = validate("CheckoutSession", session);
+export function conformantSession(
+  status: number,
+  session: unknown,
+  definition: "CheckoutSession" | "CheckoutSessionWithOrder" = "CheckoutSession",
+): Response {
+  const errors = validate(definition, session);
   if (errors.length > 0) {
-    console.error("[checkout] outbound CheckoutSession failed validation:", errors);
+    console.error(`[checkout] outbound ${definition} failed validation:`, errors);
     return errorResponse(500, {
       type: "processing_error",
       code: "session_schema_violation",
-      message: `Generated session does not conform to ACP ${ACP_API_VERSION}`,
+      message: `Generated ${definition} does not conform to ACP ${ACP_API_VERSION}`,
     });
   }
   return json(status, session);
@@ -259,7 +263,10 @@ export function aggregate(items: Array<{ id: string }>): Array<{ id: string; qua
 /** Parses and schema-checks a request body. Malformed input is the caller's. */
 export async function readBody(
   request: Request,
-  definition: "CheckoutSessionCreateRequest" | "CheckoutSessionUpdateRequest",
+  definition:
+    | "CheckoutSessionCreateRequest"
+    | "CheckoutSessionUpdateRequest"
+    | "CheckoutSessionCompleteRequest",
 ): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; response: Response }> {
   let parsed: unknown;
   try {

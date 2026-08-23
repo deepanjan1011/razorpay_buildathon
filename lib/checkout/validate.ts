@@ -31,6 +31,15 @@ const validators = {
   CheckoutSessionUpdateRequest: ajv.compile({
     $ref: `${bundle.$id}#/$defs/CheckoutSessionUpdateRequest`,
   }),
+  CheckoutSessionCompleteRequest: ajv.compile({
+    $ref: `${bundle.$id}#/$defs/CheckoutSessionCompleteRequest`,
+  }),
+  // `complete` returns the session WITH an order, which is a different
+  // definition and a wider required set — not CheckoutSession with a field
+  // added. Validating it as CheckoutSession would pass while omitting `order`.
+  CheckoutSessionWithOrder: ajv.compile({
+    $ref: `${bundle.$id}#/$defs/CheckoutSessionWithOrder`,
+  }),
   Error: ajv.compile({ $ref: `${bundle.$id}#/$defs/Error` }),
 } as const;
 
