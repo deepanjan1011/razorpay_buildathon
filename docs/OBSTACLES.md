@@ -1419,3 +1419,104 @@ POST /checkout_sessions/{id}/cancel            -> canceled
 Delivery is 0 because the cart crosses the ₹1,000 free threshold, and the total
 equals its own components. The quantity of 2 came from repeating the id, which
 is the reading forced by the schema above.
+
+---
+
+## 2026-08-23 — The webhook, written before `complete`, and five things the real payloads said
+
+Built the Razorpay webhook first, ahead of `POST /checkout_sessions/{id}/complete`,
+because it is the only endpoint an unauthenticated stranger can call and a
+security boundary that waits for the deadline gets the attention a deadline
+allows. The signature check is a pure function over `(rawBody, signature,
+secret)`, so it is exercised without a database, a live PSP, or a payment.
+
+The payloads were transcribed verbatim from Razorpay's published samples into
+`fixtures/razorpay/` **before the parser existed**. Five things in them that a
+hand-written fixture would not have contained — which is the entire argument for
+transcribing rather than authoring:
+
+1. **The event id is not in the body.** It is the `x-razorpay-event-id` HEADER.
+   None of the three real payloads carries an `id` or `event_id` field at all.
+   Any deduplication scheme keyed on something inside the payload is keyed on
+   the wrong thing, and the obvious fallback — the payment id — is wrong in the
+   other direction, because several distinct events reference one payment. There
+   is a test asserting the absence, so this cannot quietly regress.
+
+2. **`payment_link.entity.order_id` is `order_QflczVVaNJciLq`, and
+   `payload.order.entity.id`, in the same payload, is `QflczVVaNJciLq`.** The
+   prefix is present on one and absent on the other. `===` between them never
+   matches. Canonicalised by MATCHING `/^(?:[a-z]+_)?([A-Za-z0-9]+)$/` and taking
+   the capture, not by stripping the prefix — stripping is subtraction and would
+   cheerfully turn an unanticipated `order_order_x` into a plausible wrong id.
+
+3. **`notes` appears as `[]`, as `null`, and as an object across the three
+   samples.** An empty PHP-ish array where a map is documented. Any code reaching
+   `notes.acp_session_id` would be reading a property off an array on the most
+   common path. Our session id therefore travels in `reference_id`, which is also
+   what surfaces as the order's `receipt` — the field DESIGN §2 already
+   reconciles idempotency through.
+
+4. **`expire_by` and `expired_at` are `0` when unset**, not null and not absent.
+   Zero is not 1 January 1970 here; it means "no value".
+
+5. Razorpay's docs are explicit that the body must not be parsed or cast before
+   signing. There is a test that signs a `JSON.parse` → `JSON.stringify` round
+   trip of the fixture and asserts verification FAILS. That failure mode is
+   nasty precisely because it is safe-direction — it rejects every genuine event
+   while accepting no forged one — so it looks like a Razorpay problem at 2am and
+   gets "fixed" by disabling the check.
+
+**Idempotency reuses `idempotency_record`**, keyed `(x-razorpay-event-id,
+'razorpay_webhook')`. No new table: the conditional INSERT that arbitrates
+concurrent checkout retries arbitrates concurrent webhook redeliveries, and it
+is already raced by a test. Four concurrent redeliveries produce exactly one
+non-duplicate.
+
+### The typechecker found the state that had no name
+
+`SessionStatus` in `session.ts` listed five states; the database check
+constraint carries the full ACP enum. Adding `expired` to `isTerminal()` made
+`status === "expired"` a **type error in three files** — TS2367, "these types
+have no overlap" — because the union did not contain it. The tests had all
+passed: types are erased at runtime, and PGlite accepted the string happily.
+
+A green suite said yes and `npm run typecheck` said no. This is the CLAUDE.md
+"one environment says nothing about a second one" rule paying for itself in the
+smallest possible way.
+
+### Verified live over HTTP against Neon
+
+`next dev`, real server, real database, the fixture as the request body:
+
+```
+valid signature + event id     -> 200 {"duplicate":false,"outcome":"observed","reason_code":"SESSION_UNKNOWN"}
+same event id again            -> 200 {"duplicate":true,  ...}
+signature "deadbeef"           -> 401 invalid_signature
+no signature header            -> 401 invalid_signature
+valid signature, no event id   -> 400 missing_event_id
+body tampered after signing    -> 401 invalid_signature
+signature over re-serialised   -> 401 invalid_signature
+```
+
+`SESSION_UNKNOWN` is correct: the fixture's `reference_id` is `23`, and no such
+session exists in Neon. An event naming a session we do not have is an
+observation and a 200 — a 5xx would make Razorpay redeliver forever an event
+that will never mean anything different.
+
+**Still untested, and stated rather than implied: no traffic from Razorpay has
+ever hit this endpoint.** The fixtures are their published samples, not captures
+from our own account. Live delivery is unverified until a test-mode payment is
+actually made, which needs `complete` first.
+
+### `next dev` writes to CLAUDE.md
+
+Next 16 appends a `<!-- BEGIN:nextjs-agent-rules -->` block to `CLAUDE.md` on
+every `next dev`, from `generate-agent-files.js`. It is a real Next feature, not
+a corruption, but it means the project's instruction file has a second author.
+Stripped from this commit; it returns on the next `next dev` unless
+`agentRules: false` is set in a `next.config`, which this repo does not yet have.
+Noted because a block of instructions appearing in CLAUDE.md that nobody on the
+team wrote deserves to be a decision rather than a surprise.
+
+Also added `dev` and `build` scripts, whose absence meant `npm run build` — the
+one check that runs the code in the bundler it ships in — was not runnable.

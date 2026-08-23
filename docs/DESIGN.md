@@ -178,6 +178,104 @@ The limitation to state plainly: the final authorisation step is human, so this
 is not unattended agentic payment. UPI agent mandates, which would remove that
 step, do not exist as a regulated product (§7).
 
+### The pending-human state, named — decided BEFORE `complete` is written
+
+A returned payment link creates a state the session sits in for as long as a
+human takes to pay. That state must be **named, stored and expirable**, not
+inferred from the presence of a link in a response. Inferred states are how
+"we'll handle that case later" becomes "nobody knows what this row means".
+
+**The state is `complete_in_progress`.**
+
+Chosen from `CheckoutSessionBase.status`, whose enum the schema gives without
+per-value descriptions, so the choice is ours to justify:
+
+- `complete_in_progress` — `complete` was called, an order exists, the outcome
+  is not yet known. That is exactly true of a session awaiting a human payment.
+- `pending_approval` was rejected: it reads as *someone must approve this
+  purchase*, which is a mandate/authorisation concept. Phase 3 may genuinely
+  need it, and spending it here would leave nothing to say then.
+- `ready_for_payment` must **not** persist after `complete`. It means "you may
+  now call complete", and leaving it there invites a second `complete`.
+
+`complete_in_progress` is **not terminal**. `isTerminal()` stays `completed ||
+canceled` — plus `expired`, below.
+
+#### Expiry is set at `complete`, and is a real deadline
+
+`complete` sets Razorpay's `expire_by` on the payment link, and stores the same
+instant on the session. **30 minutes**, for one reason: the cart is repriced
+from the live catalogue on every read, and a payment link is the one artifact in
+this system that carries a price we can no longer recompute. Its lifetime is
+therefore the length of time we are willing to honour a stale price. A link good
+for 24 hours is a 24-hour price guarantee nobody agreed to, on a catalogue a
+merchant edits in a spreadsheet.
+
+Two clocks would disagree, so there is one instant, ours, pushed to Razorpay:
+
+- `expire_by` on the link, so Razorpay itself stops accepting payment
+- `link_expires_at` on the session, so a read can answer without a network call
+
+**A session read after `link_expires_at` reports `expired`, whether or not the
+webhook has arrived.** Derived on read, not by a sweeper job — a cron that
+exists only to write a status that can be computed from a timestamp is a moving
+part with an outage mode. `payment_link.expired` confirms it; it is not what
+causes it.
+
+`expired` is **terminal**, and joins `isTerminal()`. An expired session is not
+resumable: reviving it would serve the old total, which is the drift this whole
+design refuses.
+
+#### A late authorisation after expiry NEVER completes the session
+
+This is the case the user of a payment link actually hits, and it is decided
+here rather than discovered: a payment authorised just inside the window whose
+webhook lands outside it, or a slow issuer.
+
+**Rule: money arriving against an `expired` (or `canceled`) session does not
+change the session. It is recorded as an observation and raised as an operator
+action item.** §4 already forbids the audit log from refusing post-terminal
+events; this is the session-side half of the same decision.
+
+```json
+{
+  "action": "payment.late_authorized",
+  "outcome": "observed",
+  "session_status_at_event": "expired",
+  "reason_code": "LATE_AUTH_AFTER_EXPIRY",
+  "reason_human": "Payment captured 4m after link expiry; fulfil or refund — operator decision",
+  "evidence": { "razorpay_payment_id": "pay_...", "expired_at": "...", "captured_at": "..." }
+}
+```
+
+Why not just complete it, given the buyer really did pay? Because completing
+asserts *we sold this cart at this price*, and after expiry we no longer know
+that: the catalogue may have moved, and the session's own total is recomputed
+from a catalogue that no longer says what the link said. Fulfil-or-refund is a
+merchant's judgement about a real customer, and the honest system hands them the
+fact rather than guessing. Silently completing would also make `expired` a lie
+the dashboard tells.
+
+The money is not lost and nothing is retried (invariant 4) — a fact is recorded.
+
+#### Webhook facts, from the real payloads
+
+Transcribed from Razorpay's published samples (`OBSTACLES.md`), not invented:
+
+- **The event id is a HEADER**, `x-razorpay-event-id`. The body carries no
+  event id, so per-event idempotency keys on the header or on nothing.
+- Signature is HMAC-SHA256 over the **raw body**, keyed by the webhook secret —
+  a different secret from the API key secret. Parsing and re-serialising breaks
+  it.
+- `payment_link.entity.order_id` is `order_XXXX` while `payload.order.entity.id`
+  is the same string **without the prefix**. Comparing them naively never
+  matches.
+- `expire_by` and `expired_at` are `0` when unset, not null.
+- `notes` is variously `[]`, `null` and an object across real payloads, so it
+  cannot be relied on to carry our session id. **`reference_id` on the link
+  carries it** (and surfaces as the order's `receipt`), which is the field
+  DESIGN §2 already reconciles idempotency through.
+
 ### Explicitly not implemented — state in README
 
 - Tax configuration (flat rate stub)

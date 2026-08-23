@@ -138,7 +138,13 @@ Not implemented, and stated plainly in the README:
 | 5 | Failure path | Drift refused, logged, alternative offered |
 | 6 | Dashboard, conformance tests, README, video | Submission |
 
-Current phase: **1**. Do not build ahead of it.
+Current phase: **2**. Do not build ahead of it.
+
+Phase 1's *code* is done — ingest, normalize, feed. Its **gate is not met**: the
+accuracy number needs a real merchant sheet, which is an outreach task, not a
+coding one (`docs/TRANSCRIBING.md`). Phase 2 proceeds in parallel because
+blocking code on outreach stalls both. `NORMALIZATION-EVAL.md` stays empty until
+the sheet exists — that emptiness is the honest status, not an oversight.
 
 ---
 

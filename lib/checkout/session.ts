@@ -23,11 +23,24 @@ import { computeTotals, lineTotals, totalOf } from "./totals.ts";
 import type { CartLine, Total } from "./totals.ts";
 import { ACP_API_VERSION } from "./validate.ts";
 
+/**
+ * The states this system can actually reach, which is a SUBSET of the ACP enum
+ * the database accepts (migrations/005_checkout.sql carries the whole enum so a
+ * stored row is always a legal ACP value).
+ *
+ * `complete_in_progress` and `expired` are the pending-human state and its
+ * deadline, named in DESIGN.md §2 before `complete` was written. They are here
+ * rather than added later on purpose: leaving them out made `status ===
+ * "expired"` a type error in three files, which is exactly the check that stops
+ * a state being invented at the point of use.
+ */
 export type SessionStatus =
   | "incomplete"
   | "not_ready_for_payment"
   | "ready_for_payment"
+  | "complete_in_progress"
   | "completed"
+  | "expired"
   | "canceled";
 
 export type RequestedItem = { id: string; quantity: number };
@@ -307,8 +320,14 @@ export async function getSession(sql: Sql, id: string): Promise<CheckoutSession 
   return persist(sql, id, row.merchant_id, row.requested, session, session.status, false);
 }
 
+/**
+ * `expired` is terminal, and is terminal for the same reason `completed` is: an
+ * expired session's total was computed against a catalogue we have stopped
+ * honouring, so reviving it would serve a stale price. DESIGN.md §2 "The
+ * pending-human state, named".
+ */
 export function isTerminal(status: SessionStatus): boolean {
-  return status === "completed" || status === "canceled";
+  return status === "completed" || status === "canceled" || status === "expired";
 }
 
 export type UpdateResult =
@@ -352,6 +371,15 @@ export async function cancelSession(sql: Sql, id: string): Promise<UpdateResult 
       ok: false,
       code: "session_completed",
       message: "A completed session cannot be canceled; refund the order instead",
+    };
+  }
+  if (row.status === "expired") {
+    // Overwriting `expired` with `canceled` would destroy the fact that decides
+    // how a late authorisation is read (DESIGN.md §2). The outcomes differ.
+    return {
+      ok: false,
+      code: "session_expired",
+      message: "An expired session cannot be canceled; it is already terminal",
     };
   }
   // Cancelling an already-cancelled session is a no-op, not an error: the agent

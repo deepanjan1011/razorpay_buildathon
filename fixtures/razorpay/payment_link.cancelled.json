@@ -1,0 +1,50 @@
+{
+  "account_id": "acc_MWWeS9Ico5tQBk",
+  "contains": [
+    "payment_link"
+  ],
+  "created_at": 1748425318,
+  "entity": "event",
+  "event": "payment_link.cancelled",
+  "payload": {
+    "payment_link": {
+      "entity": {
+        "accept_partial": true,
+        "amount": 1000,
+        "amount_paid": 0,
+        "callback_method": "get",
+        "callback_url": "https://example-callback-url.com/",
+        "cancelled_at": 1748425346,
+        "created_at": 1748425318,
+        "currency": "INR",
+        "customer": {
+          "contact": "+919000090000",
+          "email": "gaurav.kumar@example.com",
+          "name": "Gaurav Kumar"
+        },
+        "description": "Payment for policy no #23456",
+        "expire_by": 1748426427,
+        "expired_at": 0,
+        "first_min_partial_amount": 100,
+        "id": "plink_QaIrRSjWiIuxAO",
+        "notes": null,
+        "notify": {
+          "email": true,
+          "sms": true,
+          "whatsapp": false
+        },
+        "reference_id": "NewTestPayment4",
+        "reminder_enable": true,
+        "reminders": {
+          "status": "failed"
+        },
+        "short_url": "https://rzp.io/rzp/zIUYsg6E",
+        "status": "cancelled",
+        "updated_at": 1748425346,
+        "upi_link": false,
+        "user_id": "",
+        "whatsapp_link": false
+      }
+    }
+  }
+}
