@@ -2835,3 +2835,29 @@ dashboard needs to display, or a query needs to filter on, belongs in structured
 evidence — the human string is for humans, and it is a duplicate rather than a
 source.** The requirement had been read as "say the ceiling in the message" when
 it meant "log the ceiling".
+
+---
+
+## 2026-08-24 — The MCP server read `.env` from the wrong directory
+
+Every tool call from Claude Code returned 401 while the token in `.env` was
+valid — verified by sending the same token over plain HTTP and getting 201.
+
+`process.loadEnvFile()` with no argument reads `${cwd}/.env`. **An MCP server's
+cwd is whatever the CLIENT launched it with**, which for Claude Code is not the
+repo. So the call silently found nothing and returned an empty token, and the
+symptom was `invalid_credential` — which reads as "your credential was revoked"
+and sends whoever is debugging to the credential table rather than to the
+filesystem.
+
+Now resolved against the module: `join(import.meta.dirname, "..", ".env")`.
+
+Same family as `import.meta.dirname` being undefined inside a bundle, and the
+same lesson CLAUDE.md already carries: **code that works when you run it from
+the right directory is not the same as code that works when something else
+starts it.** Every test ran from the repo root; the one caller that does not is
+the only caller that matters here.
+
+Verified the way the bug happens rather than the way it is convenient to test —
+launching the server from `/tmp` with a bare environment, which is the condition
+a client creates.

@@ -23,6 +23,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { join } from "node:path";
 
 // FALLS BACK TO .env, because an MCP server is launched by a client and
 // inherits whatever environment that client happened to have. `.mcp.json` can
@@ -49,9 +50,18 @@ const BASE = process.env["AGENTREADY_BASE_URL"] ?? "http://localhost:3000";
  */
 function token(): string {
   try {
-    process.loadEnvFile();
+    // RESOLVED AGAINST THIS FILE, NOT THE WORKING DIRECTORY.
+    //
+    // `process.loadEnvFile()` with no argument reads `${cwd}/.env`, and an MCP
+    // server's cwd is whatever the CLIENT launched it with — for Claude Code
+    // that is not necessarily the repo. So the bare call silently found
+    // nothing, every tool call came back 401, and the token in .env was valid
+    // the whole time. Same family as `import.meta.dirname` being undefined in a
+    // bundle: code that works when you run it from the right directory and
+    // stops when something else starts it.
+    process.loadEnvFile(join(import.meta.dirname, "..", ".env"));
   } catch {
-    /* already in the environment */
+    /* no .env, or already in the environment */
   }
   return process.env["AGENT_TOKEN"] ?? "";
 }
