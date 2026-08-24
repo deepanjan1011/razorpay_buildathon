@@ -1655,3 +1655,60 @@ no Razorpay keys in `.env`, and there never have been.** Which means the part of
 run.** Its request body is an assumption, not code. Everything up to it is
 verified; the call itself is not, and no green suite here should be read as
 saying otherwise. It needs a test-mode key before Phase 2's gate is met.
+
+---
+
+## 2026-08-24 — The first real Payment Link create: `customer: {}` is a 400
+
+Test-mode keys finally exist, so the one call in this project that spends money
+ran for the first time. It failed on the first attempt:
+
+```
+400 BAD_REQUEST_ERROR
+"incorrect JSON object received - faulty key: customer"
+```
+
+`razorpayClient()` sent `customer: request.customer ?? {}`. ACP gives us no
+buyer contact details, so `request.customer` is undefined on **every** request
+`complete` makes — meaning that `?? {}` sent an empty object every single time,
+and **every live payment link create would have failed.** Not an edge case: the
+only case.
+
+The field must be **absent**, not empty. Fixed by spreading it conditionally.
+
+### The SDK's type is what caused the bug
+
+`node_modules/razorpay/dist/types/paymentLink.d.ts:46` declares:
+
+```ts
+customer: Pick<Customers.RazorpayCustomerCreateRequestBody, 'name' | 'email' | 'contact'>;
+```
+
+Required. No `?`. The API rejects that field unless it has content, and the
+type demands it be present — so `?? {}` was not carelessness, it was the
+shortest way to satisfy a type that is wrong about its own API. Omitting the
+field now needs a cast, which is annotated at the call site: the body is
+correct and the type is the mistaken party.
+
+### Why no test could have caught it, and what replaces them
+
+`fakeClient` receives a `PaymentLinkRequest`. The defect was in translating
+that into the body Razorpay is sent, which happens *inside* `razorpayClient()`
+— the exact function any substitute replaces. **282 tests were green.** No
+number of them along that axis would have found this, for the same reason the
+four entries above were invisible: the suite holds the client constant.
+
+What replaces them is `npm run smoke:link` — one real create against test mode,
+outside `npm test` because it needs keys and the network, on the
+`scripts/smoke-extract.ts` precedent. It is the only thing in the repo that
+can fail on this.
+
+### Phase 2's gate
+
+```
+npm run smoke:link -> plink_TTQ12h9IwrTd9Q  https://rzp.io/rzp/hQi55cYB  created
+```
+
+The Payment Link create is no longer an assumption. `complete` end-to-end over
+HTTP, and live webhook delivery from Razorpay's own servers, are still not —
+both are next, and the webhook needs a public URL before it can be tried.

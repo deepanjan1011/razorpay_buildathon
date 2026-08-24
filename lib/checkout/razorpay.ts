@@ -89,7 +89,12 @@ export function razorpayClient(): PaymentLinkClient {
       const { default: Razorpay } = await import("razorpay");
       const client = new Razorpay({ key_id: keyId, key_secret: keySecret });
 
-      const link = await client.paymentLink.create({
+      // THE SDK'S TYPE IS WRONG, and wrong in the direction that caused the
+      // bug below: `customer` is declared REQUIRED in paymentLink.d.ts, while
+      // the API rejects it unless it has content. Satisfying the type is what
+      // produced `customer: {}` and a 400 on every live create. The cast keeps
+      // the correct body; the type is the thing that is mistaken here.
+      const link = (await client.paymentLink.create({
         amount: request.amount_minor,
         currency: request.currency,
         reference_id: request.reference_id,
@@ -101,8 +106,17 @@ export function razorpayClient(): PaymentLinkClient {
         notify: { email: false, sms: false, whatsapp: false },
         reminder_enable: false,
         accept_partial: false,
-        customer: request.customer ?? {},
-      });
+        // OMITTED, not defaulted to `{}`. An empty customer object is a 400
+        // from Razorpay — "faulty key: customer" — and `?? {}` sent one on
+        // every request that had no customer, which is all of them. Twenty-six
+        // unit tests could not see it: the fake accepts any body. The first
+        // real request found it immediately.
+        ...(request.customer ? { customer: request.customer } : {}),
+      } as Parameters<typeof client.paymentLink.create>[0])) as {
+        id: string;
+        short_url: string;
+        status: string;
+      };
 
       return {
         id: String(link.id),
