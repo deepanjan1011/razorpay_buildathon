@@ -2044,8 +2044,26 @@ payment_data: { handler_id, purchase_order_number, "in.agentready.redirect": {..
 
 `PaymentData.additionalProperties: false` forbids exactly what
 `ExtensionDeclaration` documents. An extension cannot be carried on the object
-the spec's own extension syntax names. Same class as `Item.quantity` and the
-`UpsertProductsResponse` gap.
+the spec's own extension syntax names.
+
+**This is a worse finding than `Item.quantity`, and worth separating from it.**
+`Item.quantity` is a documentation bug: the prose describes a field the schema
+does not have, and a careful reader resolves it by trusting the schema. Nothing
+is unbuildable — you express quantity by repetition and move on.
+
+Here the defect is structural. `ExtensionDeclaration.extends` defines a syntax
+— `$.<SchemaName>.<fieldName>` — for declaring fields an extension adds, and
+the schema those fields would land on refuses additional properties. The
+mechanism is not merely undocumented or contradicted; **it is unusable on the
+object it points at**, and no reading of the spec resolves that, because both
+halves are normative schema. An extension author has nowhere to put the
+extension. That is a design-level defect rather than an editing mistake, and it
+is the more interesting of the two to report.
+
+It also has a consequence this project felt directly: with extensions
+unavailable, a handler the spec did not anticipate has no conformant way to
+describe itself, which is why the deviation below is declared rather than
+engineered around.
 
 Of the two shapes that DO validate, `"n/a"` fabricates a credential that does
 not exist. `purchase_order_number` looks better and is worse: it means a
