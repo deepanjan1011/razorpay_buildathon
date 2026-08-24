@@ -17,6 +17,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { Sql } from "../db/sql.ts";
+import { record } from "../audit/log.ts";
 import { lookupVariants } from "../catalog/store.ts";
 import type { CatalogVariant } from "../catalog/store.ts";
 import { computeTotals, lineTotals, totalOf } from "./totals.ts";
@@ -280,7 +281,32 @@ export async function createSession(
 ): Promise<CheckoutSession> {
   const id = sessionId();
   const { session } = await priceCart(sql, merchantId, requested);
-  return persist(sql, id, merchantId, requested, session, session.status, true);
+  const stored = await persist(sql, id, merchantId, requested, session, session.status, true);
+
+  // The first row of the timeline. Not a money decision, but without it the
+  // trail starts mid-story — a refusal with no visible request in front of it
+  // reads as an accusation rather than an outcome, and the timeline is the
+  // artifact that has to be legible to someone who was not here.
+  await record(sql, {
+    session_id: id,
+    mandate_id: null,
+    actor: "agent",
+    action: "session.create",
+    outcome: session.status === "ready_for_payment" ? "allowed" : "refused",
+    session_status_at_event: session.status,
+    // A cart that is not payable at creation is a refusal, and invariant 3 says
+    // a refusal names its cause. The cause is already in the session's own
+    // messages, so it is carried across rather than restated differently in two
+    // places and allowed to drift.
+    reason_code: session.status === "ready_for_payment" ? null : "CART_NOT_PAYABLE",
+    reason_human:
+      session.status === "ready_for_payment"
+        ? null
+        : session.messages.map((m) => m.content).join("; ") || "The cart is not payable as it stands",
+    evidence: { item_count: requested.length, status: session.status },
+  });
+
+  return stored;
 }
 
 type StoredRow = {
@@ -516,10 +542,21 @@ export async function cancelSession(
   // Cancelling an already-cancelled session is a no-op, not an error: the agent
   // may be retrying, and the outcome it wants is already true.
   const { session } = await priceCart(sql, row.merchant_id, row.requested);
-  return {
-    ok: true,
-    session: await persist(sql, id, row.merchant_id, row.requested, session, "canceled", false),
-  };
+  const canceled = await persist(sql, id, row.merchant_id, row.requested, session, "canceled", false);
+
+  await record(sql, {
+    session_id: id,
+    mandate_id: null,
+    actor: "agent",
+    action: "session.cancel",
+    outcome: "allowed",
+    session_status_at_event: row.status,
+    reason_code: null,
+    reason_human: null,
+    evidence: { payment_link_cancelled: row.payment_link_id },
+  });
+
+  return { ok: true, session: canceled };
 }
 
 /** For the idempotency record: a stable hash of the request body. */

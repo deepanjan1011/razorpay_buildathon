@@ -2381,3 +2381,86 @@ convention it never defined.
 **What we did about each**: quantity by repetition (conformant); `handler_id`
 alone with the deviation declared (honest non-conformance); and our own HMAC
 scheme behind a seam, documented as ours (`lib/mandate/sign.ts`).
+
+---
+
+## 2026-08-24 — Phase 3: whichever check runs first writes history
+
+### Seventeen tests broke, and that was the evidence
+
+Wiring the gate into `complete` broke seventeen existing tests. Every one of
+them completed a payment without presenting a mandate, and after the wiring not
+one of them could pass. That is the cleanest possible demonstration that
+invariant 2 stopped being available and started being enforced — the old tests
+were a written record of the thing now forbidden.
+
+### The general lesson from the two-clocks audit consequence
+
+DESIGN.md §3 predicted this specific instance: because the link deadline is
+derived from the mandate, an expiring mandate truncates its link to the same
+instant, so the link check and the mandate check fire together and whichever
+runs first names the cause. The link plan ran first and reported
+`session_expired` — true, and useless. It says the link ran out and hides that
+the AUTHORITY did.
+
+**The lesson generalises past mandates.** Anywhere two checks can be true at the
+same moment, EXECUTION ORDER DETERMINES THE RECORDED CAUSE, and on this project
+the recorded cause is the product. An audit trail is not a by-product of the
+control flow; the control flow is what the audit trail is made of. Ordering
+checks by how they read in code — cheapest first, most specific last, whatever
+seems tidy — silently chooses which explanation the world gets.
+
+The rule that falls out: **order checks by which answer is most useful to the
+reader of the refusal**, then justify the order in the code. Ours is authority
+first, because an agent told "the link expired" fixes nothing, while an agent
+told "your mandate expired" knows to get a new one.
+
+The same instinct produced the security ordering inside the gate: an unsigned
+mandate is refused for its signature and never for its ceiling, because
+reporting a ceiling breach on an unverified mandate tells a forger the ceiling.
+
+### The audit log could render a refusal before its cause
+
+Two events written in the same millisecond tie on `ts`, and the tiebreaker was
+`event_id` — a random uuid. So a session's timeline could show `mandate.verify
+refused` above the `session.create` that preceded it.
+
+On the one artifact whose entire job is explainability, an ordering that can
+invert cause and effect is worse than no timeline. Fixed with a `bigserial`:
+insertion order is the only ordering a log can trust, because a clock has
+resolution and insertion does not.
+
+Worth naming as a pattern: **a random tiebreaker on equal timestamps is a
+stable-looking sort that is not stable.** It is a mistake with no symptom until
+two writes land in the same millisecond, which on a fast path is routine.
+
+### A guard applied per file missed a handler
+
+Three session routes were guarded with authentication and ownership. The fourth
+handler — `GET` on the session — was in a file that already contained a guarded
+`POST`, and the edit landed once per FILE rather than once per HANDLER.
+
+Nothing about `authenticate` or `ownsSession` was wrong. A handler simply did
+not call them, and **no unit test of a correct function notices a caller that
+never calls it** — the sixth-face finding again, in its authorisation costume.
+What found it was an end-to-end request: another merchant's credential read the
+session and got `200` with the cart, the totals and the payment link URL in it.
+
+The regression test is structural rather than behavioural: it walks the route
+files, splits each into handlers, and asserts every exported handler
+authenticates. Falsified by removing the guard from `GET` alone, which fails
+exactly that test and nothing else.
+
+### What the auth actually closes, and what it does not
+
+The hole in the `X-Merchant-Id` stub was never that `Authorization` went
+unchecked. It was that **the client chose which merchant it was transacting
+against**, by sending a header. The merchant now comes from the credential and
+no header can override it.
+
+`404` rather than `403` for a session belonging to someone else, because `403`
+confirms the session exists and tells an enumerating caller which ids are real.
+
+Deliberately NOT built: scopes, rotation, an agent-to-buyer binding, delegation.
+This is a signed-credential check, not an identity system, and Phase 4's gate
+does not run through any of them.

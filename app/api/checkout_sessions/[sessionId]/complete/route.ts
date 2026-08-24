@@ -18,6 +18,8 @@ import { completeSession } from "../../../../../lib/checkout/complete.ts";
 import type { CompleteRequest } from "../../../../../lib/checkout/complete.ts";
 import { razorpayClient } from "../../../../../lib/checkout/razorpay.ts";
 import { parseMandateHeader } from "../../../../../lib/mandate/store.ts";
+import { authenticate } from "../../../../../lib/auth/agent.ts";
+import { ownsSession } from "../../../../../lib/auth/scope.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +47,27 @@ export async function POST(
 
   try {
     const sql = await connect();
+
+    // WHO IS ASKING, AND IS THIS THEIRS. Neither was checked before: the id
+    // came from the path and nothing tied it to a caller, so anyone holding a
+    // session id could drive someone else's checkout. 404 rather than 403 for a
+    // session belonging to another merchant — 403 confirms it exists.
+    const agent = await authenticate(sql, request);
+    if (!agent) {
+      return errorResponse(401, {
+        type: "invalid_request",
+        code: "invalid_credential",
+        message: "Authorization must carry a valid agent credential",
+        param: "Authorization",
+      });
+    }
+    if (!(await ownsSession(sql, agent.merchant_id, sessionId))) {
+      return errorResponse(404, {
+        type: "invalid_request",
+        code: "session_not_found",
+        message: `No checkout session ${sessionId}`,
+      });
+    }
     const gate = await withIdempotency(
       sql,
       request,

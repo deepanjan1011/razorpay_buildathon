@@ -16,6 +16,8 @@ import {
 } from "../../../../lib/checkout/http.ts";
 import { getSession, updateSession } from "../../../../lib/checkout/session.ts";
 import type { RequestedItem } from "../../../../lib/checkout/session.ts";
+import { authenticate } from "../../../../lib/auth/agent.ts";
+import { ownsSession } from "../../../../lib/auth/scope.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +45,31 @@ export async function GET(
   if (!SESSION_ID.test(sessionId)) return notFound(sessionId);
 
   try {
-    const session = await getSession(await connect(), sessionId);
+    const sql = await connect();
+
+    // GET NEEDS THE SAME GUARD AS THE WRITES, and did not have it. A read of
+    // somebody else's session leaks their cart, their totals and their payment
+    // link — the URL that can take money. This handler was missed when the
+    // other three were guarded, and an end-to-end check found it: another
+    // merchant's credential read this session and got 200.
+    const agent = await authenticate(sql, request);
+    if (!agent) {
+      return errorResponse(401, {
+        type: "invalid_request",
+        code: "invalid_credential",
+        message: "Authorization must carry a valid agent credential",
+        param: "Authorization",
+      });
+    }
+    if (!(await ownsSession(sql, agent.merchant_id, sessionId))) {
+      return errorResponse(404, {
+        type: "invalid_request",
+        code: "session_not_found",
+        message: `No checkout session ${sessionId}`,
+      });
+    }
+
+    const session = await getSession(sql, sessionId);
     if (!session) return notFound(sessionId);
     // Re-priced from the live catalogue by getSession, not replayed — see
     // lib/checkout/session.ts on why a GET must not serve a stale price.
@@ -73,6 +99,27 @@ export async function POST(
 
   try {
     const sql = await connect();
+
+    // WHO IS ASKING, AND IS THIS THEIRS. Neither was checked before: the id
+    // came from the path and nothing tied it to a caller, so anyone holding a
+    // session id could drive someone else's checkout. 404 rather than 403 for a
+    // session belonging to another merchant — 403 confirms it exists.
+    const agent = await authenticate(sql, request);
+    if (!agent) {
+      return errorResponse(401, {
+        type: "invalid_request",
+        code: "invalid_credential",
+        message: "Authorization must carry a valid agent credential",
+        param: "Authorization",
+      });
+    }
+    if (!(await ownsSession(sql, agent.merchant_id, sessionId))) {
+      return errorResponse(404, {
+        type: "invalid_request",
+        code: "session_not_found",
+        message: `No checkout session ${sessionId}`,
+      });
+    }
     // Scoped per session, so the same key on two different sessions is two
     // different operations rather than a collision.
     const gate = await withIdempotency(

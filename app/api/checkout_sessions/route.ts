@@ -14,36 +14,33 @@ import {
   aggregate,
 } from "../../../lib/checkout/http.ts";
 import { createSession } from "../../../lib/checkout/session.ts";
+import { authenticate } from "../../../lib/auth/agent.ts";
 
 export const dynamic = "force-dynamic";
 
 const ENDPOINT = "POST /checkout_sessions";
 
-/**
- * Which merchant's catalogue to price against.
- *
- * Phase 2 stub: a header, because there is no agent authentication yet. Phase 3
- * replaces this with the authenticated identity — until then it is stated as a
- * stub rather than pretending the Authorization header means something.
- */
-function merchantOf(request: Request): string | null {
-  const id = request.headers.get("x-merchant-id") ?? "";
-  return /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : null;
-}
-
 export async function POST(request: Request): Promise<Response> {
   const headerError = checkHeaders(request, { post: true });
   if (headerError) return headerError;
 
-  const merchantId = merchantOf(request);
-  if (!merchantId) {
-    return errorResponse(400, {
+  // THE MERCHANT COMES FROM THE CREDENTIAL, NEVER FROM A HEADER.
+  //
+  // The Phase 2 stub read `X-Merchant-Id` off the request, which meant any
+  // caller could name any merchant and transact against their catalogue. There
+  // is no longer a header that can say who you are acting for; the token says
+  // it, and the token is verified.
+  const sql = await connect();
+  const agent = await authenticate(sql, request);
+  if (!agent) {
+    return errorResponse(401, {
       type: "invalid_request",
-      code: "invalid_request",
-      message: "X-Merchant-Id header is required and must be [A-Za-z0-9_-]{1,64}",
-      param: "X-Merchant-Id",
+      code: "invalid_credential",
+      message: "Authorization must carry a valid agent credential",
+      param: "Authorization",
     });
   }
+  const merchantId = agent.merchant_id;
 
   const parsed = await readBody(request, "CheckoutSessionCreateRequest");
   if (!parsed.ok) return parsed.response;
@@ -61,7 +58,6 @@ export async function POST(request: Request): Promise<Response> {
   const requested = aggregate(items);
 
   try {
-    const sql = await connect();
     const gate = await withIdempotency(sql, request, ENDPOINT, merchantId, parsed.body);
     if (gate.kind === "replay" || gate.kind === "conflict") return gate.response;
 

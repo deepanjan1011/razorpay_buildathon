@@ -16,7 +16,8 @@
     "bakeoff": "node scripts/bakeoff.ts",
     "latency": "node scripts/latency.ts",
     "eval": "node scripts/eval.ts",
-    "label:init": "node scripts/label-init.ts"
+    "label:init": "node scripts/label-init.ts",
+    "agent:issue": "node scripts/issue-agent-credential.ts"
   },
   "dependencies": {
     "ajv": "^8.20.0",
