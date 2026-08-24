@@ -2142,9 +2142,17 @@ razorpay_webhook | TTTkuZkPX2lHxh | 200
  "session_status_at_event":"complete_in_progress"}
 ```
 
-Test-mode card payments need the **"Pay on bank's page"** link — the OTP box
-waits for an SMS that test mode never sends, and the bank page is a simulator
-with Success and Failure buttons. Worth writing down; it wasted several minutes.
+Two test-mode traps, both of which cost real minutes and neither of which is a
+defect in this project:
+
+- **The OTP box waits for an SMS test mode never sends.** The way through is the
+  **"Pay on bank's page"** link, which opens a simulator with Success and
+  Failure buttons.
+- **`4111 1111 1111 1111` is an INTERNATIONAL test card**, and an account
+  without international payments enabled refuses it — in test mode — with
+  "International cards are not supported". That error arrives before any of our
+  code is involved, and is indistinguishable from a broken integration if you
+  are not looking at the payment page. A domestic card is required.
 
 ### `razorpay_order_id` was declared, parsed, carried, and never written
 
@@ -2176,3 +2184,20 @@ API 404s on it. `LinkEvent` now carries both — `order_id` canonical for
 matching, `order_id_raw` verbatim for persisting — and the write uses the raw
 one. `coalesce`, so a redelivery carrying no order id cannot blank an id we
 already hold.
+
+### Verified against a second real payment, not just tests
+
+The fix above was, at the moment it was written, exactly the thing this project
+keeps refusing to accept: a money-path change backed only by unit tests. A
+second live payment settled it.
+
+```
+status              completed
+payment_link_id     plink_TTTvBLiZbmFei9
+razorpay_order_id   order_TTTvWGHtGl2d3t
+```
+
+Prefixed, as Razorpay writes it, on a session that a real captured payment
+completed. **Phase 2's gate is met end to end**: session created, link created,
+URL handed to a human, payment made, signed webhook delivered, session
+transitioned, order reconciled.
