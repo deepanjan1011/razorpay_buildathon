@@ -302,6 +302,35 @@ async function load(sql: Sql, id: string): Promise<StoredRow | null> {
 }
 
 /**
+ * OUR DEADLINE CANNOT BE TIGHTER THAN THE PSP'S ENFORCEMENT OF IT.
+ *
+ * `expire_by` and `link_expires_at` are set from the same instant, so the
+ * nominal deadlines agree. The ENFORCED one does not: a probe against a real
+ * link measured Razorpay flipping it to "expired" within 30 seconds of
+ * `expire_by`, not at it — the resolution of that measurement was 30s, so the
+ * true lag is somewhere in (0s, 30s].
+ *
+ * Declaring the session expired at the nominal deadline therefore opened a
+ * window where WE said expired and the link was still payable. A payment
+ * landing in it produced a captured payment against a session whose status
+ * refuses the transition: money taken, no order. That is the cancel defect's
+ * sibling, and it is silent.
+ *
+ * The grace makes the safe ordering true rather than assumed: the link is
+ * certainly dead before we call the session expired, and a payment made inside
+ * Razorpay's real window still finds a `complete_in_progress` session and
+ * completes it — which is the correct outcome, because the buyer paid while the
+ * link was genuinely payable.
+ *
+ * 120s is four times the measured worst case. It is a margin over another
+ * system's clock, not a number with meaning of its own; re-measure before
+ * trusting a smaller one. `complete` still refuses to hand out or reuse a link
+ * past the NOMINAL deadline — that is a different question (what we are willing
+ * to stand behind) and is correctly stricter.
+ */
+const EXPIRY_ENFORCEMENT_GRACE_MS = 120_000;
+
+/**
  * Expiry is DERIVED FROM THE DEADLINE, not written by a job.
  *
  * A sweeper that exists only to set a status computable from a timestamp is a
@@ -315,7 +344,8 @@ async function load(sql: Sql, id: string): Promise<StoredRow | null> {
  */
 async function expireIfDue(sql: Sql, id: string, row: StoredRow, now: Date): Promise<boolean> {
   if (row.status !== "complete_in_progress") return false;
-  if (!row.link_expires_at || row.link_expires_at > now) return false;
+  if (!row.link_expires_at) return false;
+  if (row.link_expires_at.getTime() + EXPIRY_ENFORCEMENT_GRACE_MS > now.getTime()) return false;
 
   const { rows } = await sql.query<{ id: string }>(
     `update checkout_session

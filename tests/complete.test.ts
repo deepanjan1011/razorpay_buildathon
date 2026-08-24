@@ -24,6 +24,7 @@ import {
   updateSession,
 } from "../lib/checkout/session.ts";
 import { completeSession, planCompletion } from "../lib/checkout/complete.ts";
+import { handleEvent } from "../lib/checkout/webhook.ts";
 import type { CompletionFacts } from "../lib/checkout/complete.ts";
 import { LINK_TTL_MINUTES, RAZORPAY_MIN_TTL_MINUTES, expiryFor } from "../lib/checkout/razorpay.ts";
 import type { PaymentLinkClient, PaymentLinkRequest } from "../lib/checkout/razorpay.ts";
@@ -417,7 +418,12 @@ describe("expiry, derived on read", () => {
     (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
 
   const before = new Date("2026-08-23T10:00:00Z");
-  const after = new Date("2026-08-23T10:31:00Z");
+  // The link deadline is 10:30. Razorpay does not enforce `expire_by` at the
+  // instant itself — a probe measured the flip to "expired" within 30s of it —
+  // so the session waits out a 120s grace before calling itself expired. Any
+  // time inside that grace is a time when the link may still be payable, and a
+  // payment made there must still find a completable session.
+  const after = new Date("2026-08-23T10:33:00Z");
 
   test("a GET past the deadline reports expired, with no webhook and no cron", async () => {
     const id = await start();
@@ -524,5 +530,64 @@ describe("cancelling a session must stop the link being payable", () => {
     assert.ok(result?.ok);
     assert.equal(result.session.status, "canceled");
     assert.deepEqual(client.canceled, []);
+  });
+});
+
+describe("the window between our deadline and Razorpay's enforcement of it", () => {
+  // MEASURED, NOT ASSUMED. A probe against a real link found Razorpay flipping
+  // it to "expired" within 30s of `expire_by` rather than at it. Declaring the
+  // session expired at the nominal deadline therefore left a window where we
+  // said expired and the link was still payable — a captured payment against a
+  // session whose status refuses the transition. Money taken, no order, and
+  // silent. The cancel defect's sibling.
+  const start = async () =>
+    (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+
+  const AT_CREATE = new Date("2026-08-23T10:00:00Z"); // link deadline 10:30
+  const INSIDE_GRACE = new Date("2026-08-23T10:30:30Z");
+  const PAST_GRACE = new Date("2026-08-23T10:33:00Z");
+
+  test("a session inside the grace is NOT expired yet", async () => {
+    const id = await start();
+    assert.ok((await completeSession(sql, id, payment, fakeClient(), AT_CREATE))?.ok);
+
+    assert.equal((await getSession(sql, id, INSIDE_GRACE))?.status, "complete_in_progress");
+    assert.equal((await getSession(sql, id, PAST_GRACE))?.status, "expired");
+  });
+
+  test("a payment captured inside the grace still completes the session", async () => {
+    // This is the whole point. The buyer paid while the link was genuinely
+    // payable, so the order must exist. Before the grace this session read
+    // `expired` by the time the webhook arrived, and the payment had nowhere
+    // to land.
+    const id = await start();
+    assert.ok((await completeSession(sql, id, payment, fakeClient(), AT_CREATE))?.ok);
+
+    const live = await getSession(sql, id, INSIDE_GRACE); // the read that used to expire it
+    // The authoritative total, not a guess: the webhook refuses an amount that
+    // disagrees with the session, and a test that hardcodes one is asserting
+    // against its own arithmetic rather than the cart's.
+    const total = live?.totals.find((t) => t.type === "total")?.amount ?? 0;
+    assert.ok(total > 0);
+
+    await handleEvent(
+      sql,
+      {
+        event: "payment_link.paid",
+        event_id: "evt_grace",
+        session_id: id,
+        link_id: "plink_fake1",
+        order_id: "graceorder",
+        order_id_raw: "order_graceorder",
+        payment_id: "pay_grace",
+        amount_minor: total,
+        amount_paid_minor: total,
+        currency: "INR",
+      },
+      INSIDE_GRACE,
+    );
+
+    const after = await getSession(sql, id, PAST_GRACE);
+    assert.equal(after?.status, "completed", "a payment inside Razorpay's window must produce an order");
   });
 });

@@ -2201,3 +2201,69 @@ Prefixed, as Razorpay writes it, on a session that a real captured payment
 completed. **Phase 2's gate is met end to end**: session created, link created,
 URL handed to a human, payment made, signed webhook delivered, session
 transitioned, order reconciled.
+
+---
+
+## 2026-08-24 — Our deadline cannot be tighter than the PSP's enforcement of it
+
+The last open defect from Phase 2, and a correction to something stated
+confidently in this file two entries ago.
+
+### What was claimed, and why it was wrong
+
+The earlier audit said expiry was "safe by construction" because `expire_by`
+floors to whole seconds while `link_expires_at` keeps milliseconds, so
+Razorpay's clock fires first. That is true of the NOMINAL deadline and says
+nothing about the ENFORCED one. The probe measured the difference:
+
+```
+expire_by       2026-08-24T04:25:59Z
+status changed  2026-08-24T04:26:29Z  ->  "expired"
+```
+
+Poll resolution was 30s, so the true lag is in (0s, 30s] — enforcement happens
+*within* 30 seconds of `expire_by`, not *at* it. "Safe by construction" was a
+statement about two timestamps we control, applied to a system whose clock we
+do not.
+
+### The hole that opened
+
+Declaring the session expired at the nominal deadline left a window where WE
+said `expired` and the link was still payable. A payment landing there produced
+a captured payment against a session whose status refuses the transition:
+**money taken, no order, and no error anywhere.** The cancel defect's sibling,
+with a smaller window and the same silence.
+
+### The fix is a grace, not a cancel
+
+The obvious fix — cancel the link at the moment we declare expiry — needs a
+Razorpay client threaded through three read paths, plus a way to tell "already
+expired" from "already paid" out of a failed cancel, because those two demand
+opposite responses. That is a lot of machinery pointed at a 30-second window.
+
+Instead the session waits out a grace before calling itself expired. This makes
+the safe ordering TRUE rather than assumed: the link is certainly dead before we
+say expired, and — the actual point — **a payment made while the link was
+genuinely payable now finds a `complete_in_progress` session and completes it.**
+The buyer paid inside Razorpay's real window, so the order should exist.
+
+120s, four times the measured worst case. It is a margin over another system's
+clock, not a number with meaning of its own.
+
+`complete` still refuses to hand out or reuse a link past the NOMINAL deadline.
+That is a different question — what we are willing to stand behind — and is
+correctly stricter. Conflating the two uses of one timestamp is what created the
+window.
+
+### The tests were falsified before being trusted
+
+Setting the grace to zero fails both new tests and nothing else; restoring it
+passes all 305. A test written alongside a fix agrees with the fix by default,
+and the cheapest way to find out whether it asserts anything is to break the
+thing on purpose.
+
+The first version of the payment test hardcoded the amount and failed, because
+the webhook refuses a total that disagrees with the session and 89900 ignored
+delivery and tax. It now reads the authoritative total from the session — a
+test that hardcodes an amount is asserting against its own arithmetic rather
+than the cart's.
