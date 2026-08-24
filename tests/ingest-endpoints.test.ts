@@ -24,6 +24,9 @@ const { ingestUpload, publishFeed, feedIdFor, parseUpload } = await import(
 );
 const { runJob, getProgress, createJob } = await import("../lib/ingest/job.ts");
 const { readFeed } = await import("../lib/feed/store.ts");
+// Dynamic like the rest of this file: FEED_ROOT must be set before any of these
+// modules resolve their paths at import time.
+const { lookupVariants } = await import("../lib/catalog/store.ts");
 const uploadRoute = await import("../app/api/ingest/route.ts");
 const progressRoute = await import("../app/api/ingest/[jobId]/route.ts");
 
@@ -282,5 +285,74 @@ describe("upload parsing", () => {
     assert.ok(sheets[0]);
     assert.equal(sheets[0].headers[0], "Item Name");
     assert.equal(sheets[0].rows.length, 4);
+  });
+});
+
+describe("what is discoverable is exactly what is buyable", () => {
+  // THE SEAM NOTHING TESTED. `upsertCatalog` existed with exactly one caller —
+  // the test suite — so the feed an agent discovers from and the catalogue
+  // checkout prices against were filled by different paths, and nothing kept
+  // them agreeing. Every unit test passed throughout: each half was correct in
+  // isolation, and no fixture covered a call that was never written.
+  //
+  // The symptom is the worst shape a demo can take. An agent discovers a
+  // product, creates a session for the id it was handed, and gets
+  // not_ready_for_payment with a total of zero — because the advertised id is
+  // not in the catalogue at all. Found by driving the MCP server with a real
+  // client, on the first run that got as far as creating a session.
+  test("every variant the feed publishes can be priced by checkout", async () => {
+    const { progress } = await ingestUpload(sql, {
+      merchantId: "mer_seam",
+      sourceFile: "messy-01-preamble.xlsx",
+      bytes,
+      extract: fakeExtract,
+    });
+    await runJob(sql, progress.id, fakeExtract);
+
+    const { served, stocked } = await publishFeed(sql, progress.id, "mer_seam");
+    assert.ok(served > 0, "the fixture must publish something for this to mean anything");
+
+    const stored = await readFeed(feedIdFor("mer_seam"));
+    assert.ok(stored);
+    const advertised = stored.products.flatMap((p) => p.variants.map((v) => v.id));
+    assert.ok(advertised.length > 0);
+
+    // DIFFERENT UNITS, and the first version of this test conflated them:
+    // `served` counts PRODUCTS and `stocked` counts VARIANTS. One product with
+    // four variants is served 1, stocked 4. The catalogue is keyed by variant
+    // because that is what checkout prices, so the comparison that means
+    // anything is against the advertised variant ids.
+    assert.equal(stocked, advertised.length, "the catalogue must hold every advertised variant");
+
+    const priced = await lookupVariants(sql, "mer_seam", advertised);
+    assert.deepEqual(
+      advertised.filter((id) => !priced.has(id)),
+      [],
+      "the feed advertises ids checkout cannot price",
+    );
+  });
+
+  test("publishing twice does not duplicate the catalogue", async () => {
+    // Re-ingest is normal — a merchant reuploads a corrected sheet — and the
+    // upsert key is (merchant, variant), so a second publish updates rather
+    // than accumulating a second copy at a shifted id.
+    const { progress } = await ingestUpload(sql, {
+      merchantId: "mer_seam2",
+      sourceFile: "messy-01-preamble.xlsx",
+      bytes,
+      extract: fakeExtract,
+    });
+    await runJob(sql, progress.id, fakeExtract);
+
+    const first = await publishFeed(sql, progress.id, "mer_seam2");
+    const second = await publishFeed(sql, progress.id, "mer_seam2");
+    assert.equal(second.stocked, first.stocked);
+    assert.ok(first.stocked > 0);
+
+    const { rows } = await sql.query<{ n: number }>(
+      "select count(*)::int n from catalog_variant where merchant_id = $1",
+      ["mer_seam2"],
+    );
+    assert.equal(rows[0]?.n, first.stocked);
   });
 });

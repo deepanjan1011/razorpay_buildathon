@@ -2541,3 +2541,105 @@ codes and walks the list by fixing one peer at a time. Verified by swapping two
 entries in `PEER_ORDER`: exactly those two tests fail and the thirty-two do not,
 which is the demonstration that the coverage is real and that its limits are
 where they are claimed to be.
+
+---
+
+## 2026-08-24 — Phase 4: the gate found what four hundred tests could not
+
+### The exactly-once gate, re-derived
+
+CLAUDE.md blocks Phase 4 on re-deriving exactly-once extraction against every
+caller, because the guarantee silently broke once when `POST /api/ingest`
+became a second entry point. Re-derived rather than assumed:
+
+- Two callers claiming one batch — a conditional UPDATE, and three concurrent
+  runners are asserted never to work the same batch.
+- A caller starting while another holds a claim — the claim UPDATE returns no
+  row, so the second runner skips.
+- A crashed caller's claim expiring — the staleness clause, with a test.
+
+**And the MCP surface is not a third entry point at all.** Ingest is
+merchant-side; discover, create and complete are buyer-side, and nothing under
+`lib/feed`, `lib/catalog`, `lib/checkout` or `lib/mandate` imports the job
+layer. That conclusion decays the moment someone adds an "upload catalogue"
+tool, so it is a test: the import graph from `mcp/server.ts` is walked
+transitively and must never reach `ingest/job` or `ingest/pipeline`.
+
+### `await runJob(...)` is not awaiting the job
+
+Cost half an hour and produced a silent empty feed. `ingestUpload` starts a run
+in the background, so `await ingestUpload(...)` followed by `await runJob(...)`
+returns while the background runner still holds the batches — `runJob` returns
+when there is nothing left IT CAN CLAIM, which is correct for a claim-based
+runner and a trap for callers.
+
+`publishFeed` then published a job that had extracted nothing: **78 rows in, 0
+served, 78 withheld, and no error anywhere**, because publishing a
+partly-extracted job is deliberately allowed. Completion is a property of the
+JOB, not of any runner, so a caller that needs it must poll `getProgress`.
+Documented on `runJob` itself, where the next caller will be standing.
+
+### The seam nothing tested: discoverable was not buyable
+
+`upsertCatalog` existed with exactly one caller — the test suite. The ingest
+pipeline wrote the FEED and never populated the checkout catalogue, so the
+store an agent discovers from and the store checkout prices against were filled
+by different paths with nothing keeping them in agreement.
+
+The symptom is the worst shape a demo can take: an agent discovers a product,
+creates a session for the id it was handed, and gets `not_ready_for_payment`
+with a total of **zero**, because the advertised id does not exist in the
+catalogue. Every one of nearly four hundred tests passed throughout — each half
+was correct in isolation, and no fixture covered a call that was never written.
+Sixth face again.
+
+`publishFeed` now writes both from the same run, and `upsertCatalog` already
+withholds exactly what the feed withholds, so the two agree by construction
+rather than by discipline.
+
+### The earlier identity fix was incomplete, and a fake extractor proved it
+
+Variant identity was moved off the model's TITLE and left in front of the
+model's GROUP: `variant_group ?? identityFields`. Still a model output, so
+identity still depended on the model behaving.
+
+A fake extractor emitting one constant `variant_group` collapsed four different
+sheet rows into **one** variant id and one catalogue row. A real model can do
+exactly that. `variant_group` groups rows into a PRODUCT; it does not identify a
+VARIANT. Identity is now the merchant's cells alone — two rows in one group with
+different cells are two variants, and with identical cells they are duplicates,
+which is what dedup is for. Both fall out of the cells without asking the model
+anything.
+
+### Absent is not false, for the fourth time
+
+The feed publishes unknown availability as an ABSENT key, because most
+small-merchant sheets have no stock column and "we do not know" is the common
+case. The first MCP tool collapsed absent to `false` and reported an entire real
+catalogue as out of stock — a different and false claim, since the merchant
+never said anything was unavailable.
+
+Fourth instance of one shape, and worth naming as a recurring hazard rather than
+four unrelated bugs: **absent, empty, false and unevaluated are four different
+facts, and collapsing any two of them loses a distinction that matters.**
+Mandate categories (absent authorises anything, empty authorises nothing);
+issuance refusing an unknown category rather than dropping it; `peers_evaluated`
+distinct from an empty peer list; and now availability.
+
+### The gate, met
+
+Driven by the MCP SDK's own client over stdio — the reference implementation,
+not a hand-rolled harness — against the real Chennai snacks catalogue:
+
+```
+discover  -> 22 murukku, real titles, prices in paise
+create    -> cs_222b08081de542298c5f4634  ready_for_payment  11235
+refuse    -> MANDATE_CEILING_EXCEEDED
+             "Cart total 11235 exceeds mandate ceiling 11234"
+complete  -> complete_in_progress  https://rzp.io/rzp/QYVRIbjC
+```
+
+The server speaks HTTP to our own API rather than importing the libraries, and
+that is the point: calling `completeSession` in-process would bypass agent
+authentication, ACP schema validation, idempotency and the `Mandate` header.
+A demo that skipped those would prove the demo works, not the product.

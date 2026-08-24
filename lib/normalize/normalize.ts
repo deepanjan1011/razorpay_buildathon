@@ -210,7 +210,19 @@ function variantsForRow(
     .map(([k, v]) => `${k.toLowerCase().trim()}=${v.toLowerCase().trim().replace(/\s+/g, " ")}`)
     .sort()
     .join(";");
-  const identity = extraction.variant_group ?? (identityFields || extraction.title);
+  //
+  // AND `variant_group` IS NOT IN IT EITHER. This used to read
+  // `variant_group ?? identityFields`, which moved identity off the model's
+  // TITLE and left it in front of the model's GROUP — still a model output, so
+  // identity still depended on the model behaving. A fake extractor emitting a
+  // constant `variant_group` collapsed four different sheet rows into one
+  // variant id and one catalogue row. A real model can do exactly that.
+  //
+  // `variant_group` groups rows into a PRODUCT; it does not identify a VARIANT.
+  // Two rows in one group with different merchant cells are two variants; with
+  // identical cells they are duplicates, and collapsing them is what dedup is
+  // for. Both fall out of the cells without asking the model anything.
+  const identity = identityFields || extraction.title;
 
   return optionSets.map((options) => {
     const flags = [...baseFlags];

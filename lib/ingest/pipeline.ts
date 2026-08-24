@@ -28,6 +28,7 @@ import { createExtractor } from "../normalize/llm.ts";
 import type { ExtractFn } from "../normalize/llm.ts";
 import { projectFeed } from "../feed/project.ts";
 import { writeFeed } from "../feed/store.ts";
+import { upsertCatalog } from "../catalog/store.ts";
 
 export async function parseUpload(bytes: ArrayBuffer): Promise<ParsedSheet[]> {
   const wb = new ExcelJS.Workbook();
@@ -52,14 +53,35 @@ export async function publishFeed(
   sql: Sql,
   jobId: string,
   merchantId: string,
-): Promise<{ served: number; withheld: number }> {
+): Promise<{ served: number; withheld: number; stocked: number }> {
   const products = await assembleProducts(sql, jobId);
   const feed = projectFeed(products, {
     feedId: feedIdFor(merchantId),
     targetCountry: "IN",
   });
   await writeFeed(feed);
-  return { served: feed.products.length, withheld: feed.withheld.length };
+
+  // THE CHECKOUT CATALOGUE IS WRITTEN FROM THE SAME RUN, and it used to not be
+  // written by anything at all.
+  //
+  // `upsertCatalog` existed and had exactly one caller: the test suite. So the
+  // feed an agent discovers from and the catalogue checkout prices against were
+  // populated by different paths, and nothing kept them in agreement. The
+  // symptom is the worst shape a demo can take: an agent finds a product,
+  // creates a session for its id, and gets `not_ready_for_payment` with a total
+  // of zero, because the id it was advertised does not exist in the catalogue.
+  //
+  // Found by driving the MCP server with a real client. Every unit test passed
+  // throughout — each half was correct, and nothing tested the seam, which is
+  // the same shape as the four earlier findings: no fixture covers a call that
+  // was never written.
+  //
+  // `upsertCatalog` already withholds anything the feed withholds, so the two
+  // agree by construction rather than by discipline: what is discoverable is
+  // exactly what is buyable.
+  const stocked = await upsertCatalog(sql, merchantId, products);
+
+  return { served: feed.products.length, withheld: feed.withheld.length, stocked };
 }
 
 /**

@@ -16,7 +16,8 @@
  */
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 
 import { connectEphemeral } from "../lib/db/sql.ts";
 import type { Sql } from "../lib/db/sql.ts";
@@ -187,5 +188,49 @@ describe("a job's status and its reason cannot disagree", () => {
     // Invariant 3: both, always. An empty explanation is as bad as a false one.
     assert.ok(rows[0]?.reason_code);
     assert.ok(rows[0]?.reason_human);
+  });
+});
+
+describe("the MCP surface stays out of the ingest job layer", () => {
+  // CLAUDE.md gates Phase 4 on re-deriving exactly-once extraction against
+  // every caller, because the guarantee silently broke once when POST
+  // /api/ingest became a second entry point. Re-derived: this surface never
+  // reaches it. Ingest is merchant-side and these tools are buyer-side.
+  //
+  // A CONCLUSION LIKE THAT DECAYS. The next person to add an "upload catalogue"
+  // tool reopens the question without knowing it was ever asked, and the
+  // failure is silent — duplicate API calls against a five-per-minute budget
+  // and duplicate products under shifting ids. So the constraint is a test.
+  test("mcp/server.ts imports no part of the job layer, directly or otherwise", async () => {
+    const root = join(import.meta.dirname, "..");
+    const seen = new Set<string>();
+
+    // Follows relative imports transitively, because a second-hand import is
+    // still an entry point. `lib/checkout/complete.ts` importing the job layer
+    // would make every MCP tool a caller.
+    const walk = async (file: string): Promise<void> => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      let source: string;
+      try {
+        source = await readFile(file, "utf8");
+      } catch {
+        return;
+      }
+      assert.doesNotMatch(
+        source,
+        /from\s+["'][^"']*ingest\/(job|pipeline)\.ts["']/,
+        `${file.replace(root, "")} reaches the ingest job layer; re-derive exactly-once ` +
+          "against every caller before shipping it (CLAUDE.md Phase 4 gate)",
+      );
+      for (const m of source.matchAll(/from\s+["'](\.[^"']+\.ts)["']/g)) {
+        await walk(resolve(dirname(file), m[1]!));
+      }
+    };
+
+    await walk(join(root, "mcp", "server.ts"));
+    // Proof the walk actually walked: a server importing nothing would pass
+    // vacuously, which is the shape of test that guards nothing.
+    assert.ok(seen.size >= 1, "the import walk visited nothing");
   });
 });

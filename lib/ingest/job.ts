@@ -205,6 +205,21 @@ export type RunOptions = {
 };
 
 /**
+ * AWAITING THIS IS NOT AWAITING THE JOB. `runJob` returns when there is
+ * nothing left IT CAN CLAIM, which is not the same as the job being finished:
+ * if another runner holds the remaining batches, this returns immediately with
+ * the job still in flight. Correct for a claim-based runner, and a trap for
+ * callers.
+ *
+ * It cost a real half hour. `ingestUpload` starts a run in the background, so
+ * `await ingestUpload(...)` then `await runJob(...)` returns while the
+ * background runner is still extracting — and `publishFeed` published a feed
+ * from a job that had extracted nothing: 78 rows in, 0 served, 78 withheld, no
+ * error anywhere, because publishing a partly-extracted job is deliberately
+ * allowed. A caller that needs COMPLETION must poll `getProgress` until
+ * `rows_extracted === rows_total`. Nothing here can express that for it,
+ * because "done" is a property of the job and not of any one runner.
+ *
  * Runs or resumes a job. Safe to call repeatedly: it only ever works on batches
  * that are not yet done.
  *

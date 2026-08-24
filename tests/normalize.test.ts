@@ -592,3 +592,49 @@ describe("variant identity does not rest on the model wording a title well", () 
     assert.equal(new Set(chappal).size, 1, "a reprice must not mint a new id");
   });
 });
+
+describe("variant_group groups products; it does not identify variants", () => {
+  test("a constant variant_group does not collapse different rows into one id", async () => {
+    // THE INCOMPLETE HALF OF THE EARLIER FIX. Identity was moved off the
+    // model's TITLE and left in front of the model's variant_group —
+    // `variant_group ?? identityFields` — so it still depended on the model
+    // behaving. A fake extractor emitting one constant group collapsed four
+    // different sheet rows into a single variant id and a single catalogue row,
+    // and a real model can do the same thing.
+    const [sheet] = await parseWorkbook(fixture("messy-11-all-text.xlsx"));
+    assert.ok(sheet);
+    assert.equal(sheet.rows.length, 3);
+
+    const variants = normalizeSheet(
+      sheet,
+      sheet.rows.map((r) => extraction({ source_row: r.row, title: "Snack", variant_group: "one-group" })),
+      { merchantId: "mer_g", sourceFile: "g.xlsx" },
+    ).flatMap((p) => p.variants);
+
+    assert.equal(variants.length, 3);
+    assert.equal(
+      new Set(variants.map((v) => v.id)).size,
+      3,
+      "one variant_group must not make three different rows one variant",
+    );
+  });
+
+  test("but rows the merchant wrote identically still share an id", async () => {
+    // The other direction, so the fix above is not just "never collapse".
+    const [sheet] = await parseWorkbook(fixture("messy-09-duplicates.xlsx"));
+    const sheets = await parseWorkbook(fixture("messy-09-duplicates.xlsx"));
+    assert.ok(sheet);
+    const ids = sheets.flatMap((s) =>
+      normalizeSheet(
+        s,
+        s.rows.map((r) => extraction({ source_row: r.row, title: "Anything", variant_group: "g" })),
+        { merchantId: "mer_g", sourceFile: "g.xlsx" },
+      )
+        .flatMap((p) => p.variants)
+        .filter((v) => (v.provenance.source_cells["Item"] ?? "").toLowerCase() === "canvas shoe white")
+        .map((v) => v.id),
+    );
+    assert.equal(ids.length, 3);
+    assert.equal(new Set(ids).size, 1, "identical merchant rows are one variant");
+  });
+});
