@@ -37,13 +37,30 @@ try {
 }
 
 const BASE = process.env["AGENTREADY_BASE_URL"] ?? "http://localhost:3000";
-const TOKEN = process.env["AGENT_TOKEN"] ?? "";
+
+/**
+ * READ PER CALL, not once at startup.
+ *
+ * An MCP server is a long-lived process launched by a client. A token rotated
+ * in `.env` while it runs would otherwise be invisible until someone restarted
+ * the client — and the symptom is a 401, which reads as "your credential was
+ * revoked" rather than "this process is holding a stale one". Reading it at
+ * call time costs nothing and removes a debugging dead end.
+ */
+function token(): string {
+  try {
+    process.loadEnvFile();
+  } catch {
+    /* already in the environment */
+  }
+  return process.env["AGENT_TOKEN"] ?? "";
+}
 const API_VERSION = "2026-04-17";
 
 function headers(extra: Record<string, string> = {}): Record<string, string> {
   return {
     "API-Version": API_VERSION,
-    Authorization: `Bearer ${TOKEN}`,
+    Authorization: `Bearer ${token()}`,
     "Content-Type": "application/json",
     ...extra,
   };
@@ -55,7 +72,7 @@ const idem = () => `mcp-${Date.now()}-${Math.random().toString(16).slice(2, 10)}
 type Json = Record<string, unknown>;
 
 async function call(path: string, init: RequestInit): Promise<{ status: number; body: Json }> {
-  if (!TOKEN) {
+  if (!token()) {
     // Named rather than left as a 401. "invalid_credential" on every call is
     // indistinguishable from a revoked token, and sends whoever is debugging
     // to the wrong place entirely.

@@ -296,6 +296,12 @@ export async function completeSession(
           cart_total_minor: total,
           currency: session.currency,
           categories: cartCategories,
+          // THE CEILING, which DESIGN.md §5 item 4 names explicitly alongside
+          // the feed and live prices — and which was only ever present inside
+          // the human string. A number a reader has to parse out of prose is a
+          // number the dashboard cannot render and a query cannot filter on.
+          mandate_ceiling_minor: request.mandate?.constraints.max_amount.value ?? null,
+          mandate_expires_at: request.mandate?.expires_at ?? null,
           // EVERY PEER, PASSED AND FAILED. The response carries ONE code; the
           // record carries the whole evaluation, which is what removes
           // order-dependence from the trail. The passed set is evidence in a

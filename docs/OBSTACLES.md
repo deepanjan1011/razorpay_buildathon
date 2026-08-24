@@ -2799,3 +2799,39 @@ call returns 401 and nothing says why — indistinguishable from a revoked
 credential, and it sends whoever is debugging to entirely the wrong place. The
 server now reads `.env` like every other part of this project, and names a
 missing token instead of letting it become an authentication failure.
+
+---
+
+## 2026-08-24 — Phase 6: the ceiling was never in the evidence
+
+Built the timeline page after watching the demo rather than before, and looking
+at it found two things that reading the markup would not have.
+
+### Two numbers on one card, in two different units
+
+The refusal read `Cart total 14826 exceeds mandate ceiling 11235` while the
+drift line under it read `₹57.00 → ₹91.20`. Both correct, both on the same card,
+and a viewer has to convert one of them to compare.
+
+The recorded string keeps minor units, because that is what invariant 6 says a
+RECORD holds. A reader is not a record. The page now renders the same two
+numbers large and in rupees — `₹148.26 > ₹112.35` — beside the exact string that
+was stored.
+
+### And the ceiling was only ever inside prose
+
+DESIGN.md §5 item 4 requires the refusal to log "feed price, live price,
+ceiling". The first two were in `evidence`; the ceiling was not. It existed only
+inside `reason_human`, as text.
+
+**A number a reader has to parse out of a sentence is a number the dashboard
+cannot render and a query cannot filter on.** "Show me every refusal within 10%
+of its ceiling" is unanswerable against prose. Now recorded as
+`mandate_ceiling_minor` alongside the total, with `mandate_expires_at` beside
+it for the same reason.
+
+Worth stating as a rule, because it generalises past this row: **anything a
+dashboard needs to display, or a query needs to filter on, belongs in structured
+evidence — the human string is for humans, and it is a duplicate rather than a
+source.** The requirement had been read as "say the ceiling in the message" when
+it meant "log the ceiling".
