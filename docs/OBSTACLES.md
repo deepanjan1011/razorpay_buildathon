@@ -2267,3 +2267,79 @@ the webhook refuses a total that disagrees with the session and 89900 ignored
 delivery and tax. It now reads the authoritative total from the session — a
 test that hardcodes an amount is asserting against its own arithmetic rather
 than the cart's.
+
+---
+
+## 2026-08-24 — Phase 3 reconciliation: ACP names a Signature header and defines nothing about it
+
+Read before writing, as always. Two findings, and both change what Phase 3 can
+honestly claim.
+
+### There is no signing scheme to conform to
+
+`Signature` and `Timestamp` are declared as header parameters on every checkout
+operation. That is the entire specification of them:
+
+```yaml
+Signature:
+  name: Signature
+  in: header
+  description: HMAC signature for webhook verification
+  required: false
+  schema: { type: string, example: ZXltZX... }
+```
+
+`required: false`. No algorithm beyond the word "HMAC", no canonicalisation
+rule, no signing base, no key distribution, no rotation, no replay window,
+nothing tying `Timestamp` to the signature it is presumably meant to bound.
+Two independent implementations of this cannot verify each other's requests.
+
+The description is also wrong on its face: this is a parameter on an inbound
+agent-to-merchant request, and it says "for webhook verification". Same family
+as `Item.quantity` — prose describing something the surrounding structure is
+not.
+
+**Consequence for Phase 3, stated rather than implied:** request signing here
+cannot be *ACP-conformant*, because there is nothing to conform to. We define a
+scheme, document it as ours, and keep it behind the same seam as the webhook
+verifier. DESIGN.md §2 already lists "registered/interoperable payment handler"
+as not-implemented; this is the same shape and goes next to it.
+
+### The agent-facing refusal vocabulary is a closed enum, and mandates are not in it
+
+`MessageError.code` is closed, 21 values:
+
+```
+missing | invalid | out_of_stock | payment_declined | requires_sign_in |
+requires_3ds | low_stock | quantity_exceeded | coupon_invalid | coupon_expired |
+minimum_not_met | maximum_exceeded | region_restricted | age_verification_required |
+approval_required | unsupported | not_found | conflict | rate_limited | expired |
+intervention_required
+```
+
+**None of them means "your mandate does not authorise this".** That is expected
+— mandates are our construct, not ACP's; ACP's equivalent lives in the
+Delegated Payment Spec, which Razorpay cannot participate in (DESIGN.md §2).
+
+So the audit log's reason codes and the agent's error code are two different
+vocabularies, and the mapping has to be decided now rather than improvised per
+check. Internal codes stay specific because the audit trail is the judged
+artifact; the agent gets the nearest closed-enum value plus the human string,
+which is where the specificity survives.
+
+| Internal reason code | ACP `MessageError.code` | Why that one |
+|---|---|---|
+| `MANDATE_CEILING_EXCEEDED` | `maximum_exceeded` | the cart exceeds a stated maximum |
+| `MANDATE_ITEM_COUNT_EXCEEDED` | `quantity_exceeded` | an item count limit |
+| `MANDATE_EXPIRED` | `expired` | the authority lapsed |
+| `MANDATE_SIGNATURE_INVALID` | `invalid` | the presented mandate is not valid |
+| `MANDATE_UNKNOWN` | `not_found` | no such mandate |
+| `MANDATE_ALREADY_CONSUMED` | `conflict` | single-use, already spent |
+| `MANDATE_CATEGORY_NOT_PERMITTED` | `approval_required` | the purchase needs authority we do not hold |
+| `MANDATE_MISSING` | `approval_required` | same, with nothing presented at all |
+
+`approval_required` for the category cases is the closest honest fit: the agent
+is not being told the item is unavailable, it is being told it needs authority
+it does not have. `unsupported` would suggest the seller cannot sell it, which
+is a different and false claim — the false-reason-code failure this project has
+already made once.
