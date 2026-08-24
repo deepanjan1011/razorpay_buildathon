@@ -296,6 +296,21 @@ Transcribed from Razorpay's published samples (`OBSTACLES.md`), not invented:
   carries it** (and surfaces as the order's `receipt`), which is the field
   DESIGN §2 already reconciles idempotency through.
 
+### Declared deviations from the spec — state in README
+
+- **`payment_data` carries `handler_id` alone.** ACP's `PaymentData` is
+  `anyOf: [{handler_id, instrument}, {purchase_order_number}]`; both branches
+  assume the agent hands the seller a credential. Ours declares
+  `requires_delegate_payment: false` — the artifact is a URL travelling the
+  other way — so neither describes it. The extension mechanism does not rescue
+  it: `ExtensionDeclaration.extends` names `$.<SchemaName>.<fieldName>` as the
+  way to add fields, and `PaymentData.additionalProperties: false` rejects
+  exactly that (verified, `OBSTACLES.md`). The two shapes that do validate were
+  rejected as fabrications — `credential.token: "n/a"` invents a credential,
+  and `purchase_order_number` means a buyer-issued PO for an invoiced purchase,
+  not a slot for a session id. An honest deviation beats a field misused to
+  look conformant.
+
 ### Explicitly not implemented — state in README
 
 - Tax configuration (flat rate stub)

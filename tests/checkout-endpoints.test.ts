@@ -281,3 +281,42 @@ describe("idempotency", () => {
     if (second.kind === "replay") assert.equal(second.response.status, 409);
   });
 });
+
+describe("the no-credential handler deviation is narrow", () => {
+  // ACP's PaymentData assumes every handler carries a credential. Ours does
+  // not — the artifact is a URL travelling seller-to-agent — so neither anyOf
+  // branch fits, and the extension mechanism cannot add one because
+  // PaymentData sets additionalProperties: false. We accept handler_id alone
+  // and declare it. What must NOT happen is that declaring it turns
+  // CheckoutSessionCompleteRequest into a schema nothing is checked against.
+  const body = (payment_data: unknown) =>
+    new Request("https://x/", { method: "POST", body: JSON.stringify({ payment_data }) });
+
+  test("handler_id alone is accepted", async () => {
+    const r = await readBody(body({ handler_id: "razorpay_link" }), "CheckoutSessionCompleteRequest");
+    assert.equal(r.ok, true);
+  });
+
+  test("payment_data with NO handler_id is still refused", async () => {
+    const r = await readBody(body({}), "CheckoutSessionCompleteRequest");
+    assert.equal(r.ok, false);
+  });
+
+  test("an unknown field on payment_data is still refused", async () => {
+    // The waiver covers the missing-branch error only. additionalProperties
+    // must keep biting, or a typo in a field name would pass silently.
+    const r = await readBody(
+      body({ handler_id: "razorpay_link", handler_i: "typo" }),
+      "CheckoutSessionCompleteRequest",
+    );
+    assert.equal(r.ok, false);
+  });
+
+  test("a malformed instrument is still refused when one IS sent", async () => {
+    const r = await readBody(
+      body({ handler_id: "razorpay_link", instrument: { type: "card" } }),
+      "CheckoutSessionCompleteRequest",
+    );
+    assert.equal(r.ok, false);
+  });
+});

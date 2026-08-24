@@ -2003,19 +2003,26 @@ complete -> link status "created"
 cancel   -> session "canceled", link status "cancelled"
 ```
 
-### Why no test could have caught it, again
+### The sixth face: a missing interaction has no fixture
 
 `cancelSession` never called the client, so there was nothing for a fake to
-observe — the absence of a call is invisible to a test that only inspects the
-calls that happened. The suite was not weak here so much as blind: a missing
-interaction has no fixture. What found it was asking Razorpay what it thought
-the link's status was, which is a question no unit test can ask.
+observe. **The absence of a call is invisible to a fake that only records the
+calls that happen.** The suite was not weak here so much as blind, and this
+generalises well past this codebase: every mocking approach can assert what was
+called and with what, and none of them can notice a call that was never written.
+You cannot write `expect(nothing).toHaveHappened()` against a collaborator the
+code forgot existed.
+
+That is the sixth face of the finding this project keeps rediscovering, and the
+first one that is not about a value being wrong — it is about an interaction
+being absent. What found it was asking Razorpay what it thought the link's
+status was, which is a question no unit test can ask.
 
 The three tests added now assert the property directly: the link is cancelled,
 a refusal leaves the session alone, and a session with no link never calls
 Razorpay at all.
 
-### An open conformance question, not a bug
+### The deviation, settled: `handler_id` alone
 
 ACP's `PaymentData` is `anyOf: [{handler_id, instrument}, {purchase_order_number}]`.
 Our handler declares `requires_delegate_payment: false` — the agent receives a
@@ -2025,10 +2032,60 @@ fits. The repo currently uses both conventions: `tests/complete.test.ts` sends
 `purchase_order_number`. `completeSession` reads only `handler_id`, so both are
 accepted today.
 
-One of them has to be the documented one. `"n/a"` fabricates a credential that
-does not exist, which is the kind of plausible-looking placeholder this project
-keeps rejecting elsewhere. Recording it as an open decision rather than settling
-it silently.
+**Both were rejected, and the extension mechanism was checked rather than
+assumed.** `ExtensionDeclaration.extends` documents `$.<SchemaName>.<fieldName>`
+as the way an extension adds fields — so the mechanism formally covers
+`PaymentData`. It does not work:
+
+```
+payment_data: { handler_id, purchase_order_number, "in.agentready.redirect": {...} }
+-> REJECTED — must NOT have additional properties
+```
+
+`PaymentData.additionalProperties: false` forbids exactly what
+`ExtensionDeclaration` documents. An extension cannot be carried on the object
+the spec's own extension syntax names. Same class as `Item.quantity` and the
+`UpsertProductsResponse` gap.
+
+Of the two shapes that DO validate, `"n/a"` fabricates a credential that does
+not exist. `purchase_order_number` looks better and is worse: it means a
+buyer-issued PO reference for an invoiced purchase, and putting a session id in
+it because the field is free-shaped is the same fabrication wearing a disguise —
+a reader who knows procurement reads it as a misuse.
+
+So: **`handler_id` alone, and the deviation is declared.** The waiver is narrow
+by construction — it drops exactly the three ajv errors that make up one anyOf
+failure, only when `handler_id` is present, and only on this request. Bounded by
+tests: no `handler_id` is still refused, an unknown field on `payment_data` is
+still refused, a malformed `instrument` is still refused when one is sent.
+
+ajv reports an anyOf failure as **three** errors — one per branch, then the
+roll-up `must match a schema in anyOf`. Waiving only the two branch errors left
+the roll-up standing and the request still 400ing, which is what the first
+version of this did.
+
+The other convention is deleted. Two conventions in one repo, with a reader that
+ignores both, is how the wrong one survives to submission.
+
+### Audit: is cancel the only transition that should reach Razorpay?
+
+Asked because the cancel hole might not be the only one. It is not, and expiry
+is correct by construction rather than by luck: `expire_by` is
+`Math.floor(at / 1000)` while `link_expires_at` keeps milliseconds, so
+Razorpay's clock fires up to 999ms BEFORE ours. The link dies first. The unsafe
+ordering — a live link on an expired session — cannot happen by construction,
+and the reverse costs nothing.
+
+The remaining transitions were checked too. `complete` on an expired link
+refuses rather than minting a second one; on a drifted price it refuses and
+tells the agent to cancel and start again — advice that only became true today,
+because before the fix cancelling left the link payable. `update` while a link
+is live already refused.
+
+One assumption stays unverified and is stated rather than implied: **we have
+not watched Razorpay actually expire a link at `expire_by`.** Expiry
+correctness rests on their clock doing what it says, and confirming it needs a
+fifteen-minute wait nobody has spent yet.
 
 ### Still not done in Phase 2
 

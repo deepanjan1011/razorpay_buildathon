@@ -89,9 +89,10 @@ function fakeClient(): PaymentLinkClient & { calls: PaymentLinkRequest[]; cancel
   };
 }
 
-const payment = { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id, instrument: {
-  type: "payment_link", credential: { type: "url", token: "n/a" },
-} } };
+// `handler_id` ALONE. This handler carries no credential, so neither of
+// PaymentData's anyOf branches describes it; sending `credential.token: "n/a"`
+// would fabricate one. Declared as a deviation — see lib/checkout/http.ts.
+const payment = { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id } };
 
 beforeEach(async () => {
   sql = await connectEphemeral();

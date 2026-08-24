@@ -14,6 +14,7 @@
 import type { Sql } from "../db/sql.ts";
 import { bodyHash } from "./session.ts";
 import { ACP_API_VERSION, validate } from "./validate.ts";
+import type { ValidationError } from "../schema/ajv.ts";
 
 export type AcpError = {
   type: "invalid_request" | "processing_error" | "service_unavailable";
@@ -261,6 +262,47 @@ export function aggregate(items: Array<{ id: string }>): Array<{ id: string; qua
 }
 
 /** Parses and schema-checks a request body. Malformed input is the caller's. */
+
+/**
+ * DECLARED DEVIATION: a payment handler that carries no credential.
+ *
+ * ACP's `PaymentData` is `anyOf: [{handler_id, instrument}, {purchase_order_number}]`.
+ * Both branches assume the agent hands the seller something. Our handler
+ * declares `requires_delegate_payment: false` — the artifact is a URL, and it
+ * travels the other way, seller to agent — so neither branch describes it.
+ *
+ * The extension mechanism does not rescue it, which was checked rather than
+ * assumed: `ExtensionDeclaration.extends` documents `$.<SchemaName>.<fieldName>`
+ * as the way to add fields, and `PaymentData.additionalProperties: false`
+ * rejects exactly that. An extension field alongside a satisfying branch fails
+ * with "must NOT have additional properties". Same class as `Item.quantity`.
+ *
+ * The two shapes that DO validate were both rejected on honesty grounds. A
+ * fabricated `credential.token: "n/a"` asserts a credential that does not
+ * exist. `purchase_order_number` means a buyer-issued PO reference for an
+ * invoiced purchase; stuffing a session id into it because the field is
+ * free-shaped is the same fabrication, better disguised, and a reader who knows
+ * procurement would call it a misuse.
+ *
+ * So we accept `handler_id` alone and DECLARE THE DEVIATION in the README. An
+ * honest deviation beats a field misused to look conformant.
+ *
+ * Narrow on purpose: this waives exactly one error, on exactly one path, only
+ * when `handler_id` is present. Every other conformance failure still 400s.
+ */
+function isNoCredentialHandler(error: ValidationError, body: unknown): boolean {
+  if (error.path !== "/payment_data") return false;
+  // ajv reports an anyOf failure as three errors: one per branch, then the
+  // roll-up. All three are the same fact and all three must be waived — waiving
+  // only the branch errors leaves "must match a schema in anyOf" standing, which
+  // is what the first version of this did.
+  const isBranchMiss = /required property '(instrument|purchase_order_number)'/.test(error.message);
+  const isRollup = error.message === "must match a schema in anyOf";
+  if (!isBranchMiss && !isRollup) return false;
+  const data = (body as { payment_data?: { handler_id?: unknown } } | null)?.payment_data;
+  return typeof data?.handler_id === "string";
+}
+
 export async function readBody(
   request: Request,
   definition:
@@ -282,7 +324,7 @@ export async function readBody(
     };
   }
 
-  const errors = validate(definition, parsed);
+  const errors = validate(definition, parsed).filter((e) => !isNoCredentialHandler(e, parsed));
   if (errors.length > 0) {
     const first = errors[0];
     return {
