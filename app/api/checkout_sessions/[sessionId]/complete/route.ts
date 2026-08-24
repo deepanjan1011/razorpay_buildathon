@@ -131,6 +131,13 @@ export async function POST(
         type: "invalid_request" as const,
         code: outcome.code,
         message: outcome.message,
+        // A refusal an agent can act on. ACP's Error schema has no slot for
+        // this and sets additionalProperties: false, so it rides beside the
+        // error rather than inside it — the same wall the mandate hit, and
+        // declared the same way rather than dropped for tidiness.
+        ...(outcome.alternatives && outcome.alternatives.length > 0
+          ? { alternatives: outcome.alternatives }
+          : {}),
       };
       // Committed to the idempotency record, so a retry of a refused complete
       // gets the same refusal rather than a second attempt at the PSP.

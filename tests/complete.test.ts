@@ -739,3 +739,119 @@ describe("two clocks — the mandate is the ceiling", () => {
     assert.equal(client.calls[0]?.expire_by, Math.floor(Date.parse("2026-08-23T10:30:00Z") / 1000));
   });
 });
+
+describe("the failure path: drift refused, logged, alternative offered", () => {
+  // DESIGN.md §5. One scenario that exercises all five bar items — explainable,
+  // bounded, gated, audited, gracefully failed.
+  const cheaper = () =>
+    product({
+      id: "prod_cheap",
+      variants: [variant({ id: "var_cheap", title: "Canvas Shoe - Budget", price: { amount_minor: 40000, currency: "INR" } })],
+    });
+
+  /**
+   * OVER THE CEILING AND NOT IN THE CART, which is what makes the assertions
+   * below able to fail. Without it the catalogue holds only the refused item
+   * and one affordable option, so a ceiling filter that did nothing at all
+   * would still offer something affordable and every assertion would pass —
+   * a suite that looks like it tests the property and does not. Verified by
+   * removing the ceiling clause and watching these fail.
+   */
+  const tooDear = () =>
+    product({
+      id: "prod_lux",
+      variants: [variant({ id: "var_lux", title: "Canvas Shoe - Limited", price: { amount_minor: 250000, currency: "INR" } })],
+    });
+
+  test("a cart over the ceiling is refused with no PSP call, and offered something it can afford", async () => {
+    await upsertCatalog(sql, MERCHANT, [product(), cheaper(), tooDear()]);
+    const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+    const client = fakeClient();
+
+    // Authority for less than the cart costs.
+    const mandate = validMandate({ max_amount: { value: 60000, currency: "INR" } });
+    const outcome = await completeSession(
+      sql, id, { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id }, mandate }, client,
+    );
+
+    assert.equal(outcome?.ok, false);
+    assert.ok(outcome && !outcome.ok);
+    assert.equal(outcome.code, "MANDATE_CEILING_EXCEEDED");
+    // Bounded and gated: refused BEFORE any Razorpay call.
+    assert.deepEqual(client.calls, []);
+
+    // Gracefully failed: something it could actually buy instead.
+    assert.ok(outcome.alternatives && outcome.alternatives.length > 0, "no alternative offered");
+    for (const alt of outcome.alternatives) {
+      assert.ok(alt.price_minor <= 60000, `${alt.id} is over the ceiling it was offered against`);
+      assert.notEqual(alt.id, "var_shoe", "the refused item was offered back");
+    }
+  });
+
+  test("an alternative offered would itself pass the gate", async () => {
+    // THE INVERSE OF THE SPECIFICITY RULE. The gate must not refuse what the
+    // mandate allows; this must not offer what the gate would refuse. An
+    // alternative that fails on the next call sends the agent around a loop and
+    // spends its budget to arrive back here.
+    await upsertCatalog(sql, MERCHANT, [product(), cheaper(), tooDear()]);
+    const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+    const mandate = validMandate({ max_amount: { value: 60000, currency: "INR" } });
+
+    const refused = await completeSession(
+      sql, id, { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id }, mandate }, fakeClient(),
+    );
+    assert.ok(refused && !refused.ok && refused.alternatives?.length);
+
+    // Take the offer and walk it back through the whole path.
+    const alt = refused.alternatives[0]!;
+    const second = (await createSession(sql, MERCHANT, [{ id: alt.id, quantity: 1 }])).id;
+    const client = fakeClient();
+    const outcome = await completeSession(
+      sql, second, { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id }, mandate }, client,
+    );
+
+    assert.equal(outcome?.ok, true, "the alternative we offered was refused by our own gate");
+    assert.equal(client.calls.length, 1);
+  });
+
+  test("a refusal an alternative cannot answer gets none", async () => {
+    // An expired mandate is not fixed by a cheaper product, and offering one
+    // would imply the purchase is still possible.
+    await upsertCatalog(sql, MERCHANT, [product(), cheaper(), tooDear()]);
+    const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+    const expired = signMandate({ ...validMandate(), expires_at: "2020-01-02T00:00:00Z" });
+
+    const outcome = await completeSession(
+      sql, id, { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id }, mandate: expired }, fakeClient(),
+    );
+    assert.ok(outcome && !outcome.ok);
+    assert.equal(outcome.code, "MANDATE_EXPIRED");
+    assert.deepEqual(outcome.alternatives ?? [], []);
+  });
+
+  test("the drift is named in the audit trail, not just the total", async () => {
+    await upsertCatalog(sql, MERCHANT, [product()]);
+    // The agent quotes the price it read from the feed; the catalogue has moved.
+    const id = (await createSession(sql, MERCHANT, [
+      { id: "var_shoe", quantity: 1, quoted_minor: 79900 },
+    ])).id;
+
+    await completeSession(
+      sql,
+      id,
+      {
+        payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id },
+        mandate: validMandate({ max_amount: { value: 60000, currency: "INR" } }),
+      },
+      fakeClient(),
+    );
+
+    const rows = await timeline(sql, id);
+    const refusal = rows.find((r) => r.action === "mandate.verify" && r.outcome === "refused");
+    assert.ok(refusal);
+    const drift = (refusal.evidence as { drift?: Array<Record<string, number>> }).drift ?? [];
+    assert.equal(drift.length, 1, "the drift that caused this is not in the record");
+    assert.equal(drift[0]?.["quoted_minor"], 79900);
+    assert.equal(drift[0]?.["live_minor"], 89900);
+  });
+});

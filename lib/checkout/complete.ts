@@ -25,6 +25,8 @@ import { verifyMandateSignature } from "../mandate/sign.ts";
 import { consume, isConsumed } from "../mandate/store.ts";
 import type { Mandate } from "../mandate/schema.ts";
 import { record } from "../audit/log.ts";
+import { alternativesFor } from "../catalog/alternatives.ts";
+import type { Alternative } from "../catalog/alternatives.ts";
 import { isTerminal } from "./session.ts";
 import { isCategory } from "../normalize/taxonomy.ts";
 import type { Category } from "../normalize/taxonomy.ts";
@@ -153,7 +155,20 @@ export function planCompletion(
 
 export type CompleteOutcome =
   | { ok: true; session: CheckoutSession & { order: OrderView }; reused: boolean }
-  | { ok: false; status: number; code: string; message: string; session?: CheckoutSession };
+  | {
+      ok: false;
+      status: number;
+      code: string;
+      message: string;
+      session?: CheckoutSession;
+      /**
+       * In-mandate alternatives, where the refusal is one an alternative can
+       * answer. Empty for refusals it cannot — an expired mandate is not fixed
+       * by a cheaper product, and offering one would imply the purchase is
+       * still possible.
+       */
+      alternatives?: Alternative[];
+    };
 
 export type OrderView = {
   id: string;
@@ -286,6 +301,19 @@ export async function completeSession(
           // order-dependence from the trail. The passed set is evidence in a
           // dispute — "the ceiling, the category and the item count were
           // within bounds" is a statement, and silence is not.
+          // THE DRIFT, NAMED. A refusal that says only "the total changed" is
+          // an audit entry; one that says "you read 5700, it is 5900" is an
+          // explanation, and it is what makes the failure path legible in a
+          // dashboard rather than merely recorded.
+          drift: row.requested
+            .map((r) => {
+              const line = lines.find((l) => l.variant.variant_id === r.id);
+              if (!line || r.quoted_minor === undefined) return null;
+              const live = line.variant.price_minor;
+              if (live === r.quoted_minor) return null;
+              return { id: r.id, quoted_minor: r.quoted_minor, live_minor: live };
+            })
+            .filter((d) => d !== null),
           peers_evaluated: verdict.peers_evaluated,
           peers_failed: verdict.peers
             .filter((p) => p.reason_code)
@@ -293,12 +321,35 @@ export async function completeSession(
           peers_passed: verdict.peers.filter((p) => !p.reason_code).map((p) => p.check),
         },
       });
+      // AN IN-MANDATE ALTERNATIVE, WHERE ONE EXISTS. DESIGN.md §5 item 3.
+      //
+      // Offered only for refusals an alternative can actually answer. A cart
+      // over the ceiling has a cheaper option; an EXPIRED mandate does not —
+      // suggesting a different product to an agent whose authority has lapsed
+      // is noise, and worse, it implies the purchase is still possible.
+      const answerable =
+        verdict.reason_code === "MANDATE_CEILING_EXCEEDED" ||
+        verdict.reason_code === "MANDATE_CATEGORY_NOT_PERMITTED" ||
+        verdict.reason_code === "MANDATE_ITEM_COUNT_EXCEEDED";
+
+      const alternatives = answerable && request.mandate
+        ? await alternativesFor(sql, row.merchant_id, {
+            mandate: request.mandate,
+            // The WHOLE ceiling, because these refusals mean the current cart
+            // is being abandoned rather than added to.
+            budgetMinor: request.mandate.constraints.max_amount.value,
+            nearCategories: cartCategories,
+            excludeIds: lines.map((l) => l.variant.variant_id),
+          })
+        : [];
+
       const current: CheckoutSession = { id: sessionId, ...session, status: row.status };
       return {
         ok: false,
         status: 403,
         code: verdict.reason_code,
         message: verdict.reason_human,
+        alternatives,
         session: current,
       };
     }

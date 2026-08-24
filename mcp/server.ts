@@ -204,12 +204,28 @@ server.registerTool(
     );
 
     if (status !== 200) {
+      const alternatives = Array.isArray(body["alternatives"]) ? body["alternatives"] : [];
       return asText({
         refused: true,
         reason_code: body["code"],
         // The human string is the actionable half. An agent told
         // "MANDATE_CEILING_EXCEEDED" alone cannot tell by how much.
         explanation: body["message"],
+        // Present only when the refusal is one an alternative can answer. An
+        // expired mandate gets none, because a cheaper product does not restore
+        // lapsed authority and offering one would imply the purchase is still
+        // possible.
+        ...(alternatives.length > 0
+          ? {
+              alternatives,
+              next_step:
+                "These fit the mandate. Create a new session with one of these ids and complete again.",
+            }
+          : {}),
+        // Said explicitly, because an agent that retries a mandate refusal
+        // burns its budget arriving back here. Invariant 4: retry transport
+        // failures, never refusals.
+        retryable: false,
         status,
       });
     }

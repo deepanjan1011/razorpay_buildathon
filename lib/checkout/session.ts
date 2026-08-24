@@ -45,7 +45,19 @@ export type SessionStatus =
   | "expired"
   | "canceled";
 
-export type RequestedItem = { id: string; quantity: number };
+export type RequestedItem = {
+  id: string;
+  quantity: number;
+  /**
+   * The unit price the AGENT quoted, from ACP's `Item.unit_amount`.
+   *
+   * Never used to price anything — checkout is authoritative and a price the
+   * buyer supplies is a price the buyer chose. It exists so a refusal can name
+   * the drift that caused it: "you read 5700, it is now 5900" rather than "the
+   * total changed".
+   */
+  quoted_minor?: number;
+};
 
 export type AcpMessage = {
   type: "error" | "info";

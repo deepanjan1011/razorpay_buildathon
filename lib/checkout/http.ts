@@ -252,13 +252,28 @@ export async function withIdempotency(
  * Aggregating rather than creating duplicate lines is the useful reading: an
  * agent asking for the same variant twice means two units, not two carts.
  */
-export function aggregate(items: Array<{ id: string }>): Array<{ id: string; quantity: number }> {
+export function aggregate(
+  items: Array<{ id: string; unit_amount?: unknown }>,
+): Array<{ id: string; quantity: number; quoted_minor?: number }> {
   const counts = new Map<string, number>();
+  // WHAT THE AGENT THOUGHT IT COST. `Item.unit_amount` is ACP's own field and
+  // is the only way a seller can learn the price the agent was working from —
+  // the feed is a cached document and checkout is authoritative, so the two
+  // disagreeing is normal rather than exceptional. Keeping it turns "the total
+  // changed" into "you read 5700, it is 5900", which is the difference between
+  // an audit entry and an explanation.
+  const quoted = new Map<string, number>();
   for (const item of items) {
     const id = String(item.id);
     counts.set(id, (counts.get(id) ?? 0) + 1);
+    if (typeof item.unit_amount === "number" && Number.isInteger(item.unit_amount)) {
+      quoted.set(id, item.unit_amount);
+    }
   }
-  return [...counts.entries()].map(([id, quantity]) => ({ id, quantity }));
+  return [...counts.entries()].map(([id, quantity]) => {
+    const q = quoted.get(id);
+    return q === undefined ? { id, quantity } : { id, quantity, quoted_minor: q };
+  });
 }
 
 /** Parses and schema-checks a request body. Malformed input is the caller's. */

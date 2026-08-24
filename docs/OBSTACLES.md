@@ -2643,3 +2643,68 @@ The server speaks HTTP to our own API rather than importing the libraries, and
 that is the point: calling `completeSession` in-process would bypass agent
 authentication, ACP schema validation, idempotency and the `Mandate` header.
 A demo that skipped those would prove the demo works, not the product.
+
+---
+
+## 2026-08-24 — Phase 5: the specificity rule, inverted
+
+Four of DESIGN.md §5's six requirements were already met by Phases 2 and 3 —
+refuse before any PSP call, machine code plus human string, no blind retry, a
+session that stays retrievable. The two that were not: an in-mandate
+alternative, and evidence naming the drift.
+
+### An alternative that would be refused is worse than none
+
+The gate must not refuse a purchase the mandate allows. The alternative finder
+is the same rule pointing the other way: **it must not offer a purchase the gate
+would refuse.** An alternative that fails on the next call sends the agent
+around a loop and spends its budget to arrive back where it started.
+
+So every constraint the gate checks is applied here, in the same direction,
+against the same data — the category constraint read exactly as the gate reads
+it (absent authorises anything, present restricts, empty authorises nothing),
+and the ceiling as the whole ceiling, because these refusals mean the cart is
+being abandoned rather than added to.
+
+Deliberately not a recommender. No similarity scoring, no ranking model: a model
+in this path is a model adjacent to the charge decision, and invariant 1 keeps
+it out. Same category, within budget, closest price first.
+
+**Alternatives are offered only for refusals an alternative can answer.** A
+cheaper product does not restore an expired mandate, and offering one would
+imply the purchase is still possible — a false suggestion is the
+false-reason-code failure wearing a helpful face.
+
+### The drift is named, using ACP's own field
+
+`Item.unit_amount` exists in the schema and is the only way a seller learns the
+price the agent was working from. The feed is a cached document and checkout is
+authoritative, so the two disagreeing is normal rather than exceptional.
+
+Captured, never used for pricing — a price the buyer supplies is a price the
+buyer chose. It exists so the audit record can say *you read 5700, it is now
+5900* instead of *the total changed*, which is the difference between an entry
+and an explanation.
+
+`alternatives` rides beside the ACP error rather than inside it: the `Error`
+schema sets `additionalProperties: false` and has no slot for it. Third time
+that wall has been hit, and declared the same way each time rather than dropped
+for tidiness.
+
+### A test that looked like it tested the property and did not
+
+The suite asserting "an alternative we offer would itself pass our gate" passed
+with the ceiling filter deliberately removed. The fixture held only the refused
+item and one affordable option, so after excluding the cart item there was
+nothing over-budget left to wrongly offer — every assertion passed against a
+filter that did nothing.
+
+Fixed by adding a product ABOVE the ceiling and not in the cart, which is what
+gives the assertions something to fail on. Re-verified: removing the ceiling
+clause now fails exactly two tests.
+
+Second time in two days that a suite has looked exhaustive while being unable to
+fail, after the thirty-two peer combinations that derive their expectation from
+the rule they appear to test. Both were found the same way — by breaking the
+code on purpose — and that is now the only thing that distinguishes coverage
+from decoration.
