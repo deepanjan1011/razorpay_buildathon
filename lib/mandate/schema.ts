@@ -91,11 +91,64 @@ export const ACP_CODE: Record<MandateReasonCode, string> = {
   MANDATE_ITEM_COUNT_EXCEEDED: "quantity_exceeded",
 };
 
-export type MandateRefusal = {
+/**
+ * The five peer checks, IN THE ORDER THE RESPONSE REPORTS THEM.
+ *
+ * This constant is the order. It is pinned by a test that fails if it changes,
+ * not by a comment asking nicely — on this project a convention in the money
+ * path gets enforced in code, the way the eval's refusals and the audit check
+ * constraint are.
+ *
+ * Authority-shaped checks first: an agent told "the link expired" learns
+ * nothing it can act on, while an agent told "your mandate expired" knows to
+ * get a new one.
+ */
+export const PEER_ORDER = [
+  "validity_window",
+  "single_use",
+  "ceiling",
+  "category",
+  "item_count",
+] as const;
+
+export type PeerCheck = (typeof PEER_ORDER)[number];
+
+/** One peer's result. `reason_code` absent means it passed. */
+export type PeerEvaluation = {
+  check: PeerCheck;
+  reason_code?: MandateReasonCode;
+  reason_human?: string;
+};
+
+/**
+ * WHICH POLICY DECIDED THIS, stamped on every audit row.
+ *
+ * If the check set or the check order ever changes — a refactor, a new
+ * constraint in Phase 5 — rows written before and after mean different things
+ * about identical situations, and nothing in the trail would say so. A payment
+ * audit trail that cannot be read years later is not one.
+ *
+ * Bump this whenever PEER_ORDER, the preconditions, or any check's trigger
+ * condition changes. Not on a comment edit.
+ */
+export const GATE_VERSION = "2026-08-24.1";
+
+type VerdictCommon = {
+  gate_version: string;
+  /**
+   * FALSE when a precondition stopped evaluation. Distinct from an empty
+   * `peers` list: "no peer failed" and "no peer ran" are different facts, and a
+   * reader must not have to guess which one silence meant.
+   */
+  peers_evaluated: boolean;
+  peers: PeerEvaluation[];
+};
+
+export type MandateRefusal = VerdictCommon & {
   ok: false;
   reason_code: MandateReasonCode;
   reason_human: string;
   acp_code: string;
 };
 
-export type MandateVerdict = { ok: true } | MandateRefusal;
+export type MandateVerdict = (VerdictCommon & { ok: true }) | MandateRefusal;

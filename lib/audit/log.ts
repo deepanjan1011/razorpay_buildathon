@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { Sql } from "../db/sql.ts";
+import { GATE_VERSION } from "../mandate/schema.ts";
 
 export type Actor = "agent" | "system" | "merchant" | "psp";
 export type Outcome = "allowed" | "refused" | "error" | "observed";
@@ -26,6 +27,12 @@ export type AuditEvent = {
   reason_code: string | null;
   reason_human: string | null;
   evidence?: Record<string, unknown>;
+  /**
+   * The policy version that produced this row. Defaults to the version
+   * currently in force, so a caller cannot silently omit it — an unversioned
+   * row is an uninterpretable row.
+   */
+  gate_version?: string;
 };
 
 export async function record(sql: Sql, event: AuditEvent): Promise<string> {
@@ -43,8 +50,8 @@ export async function record(sql: Sql, event: AuditEvent): Promise<string> {
   await sql.query(
     `insert into audit_event
        (event_id, session_id, mandate_id, actor, action, outcome,
-        session_status_at_event, reason_code, reason_human, evidence)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        session_status_at_event, reason_code, reason_human, evidence, gate_version)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [
       eventId,
       event.session_id,
@@ -56,6 +63,7 @@ export async function record(sql: Sql, event: AuditEvent): Promise<string> {
       event.reason_code,
       event.reason_human,
       JSON.stringify(event.evidence ?? {}),
+      event.gate_version ?? GATE_VERSION,
     ],
   );
   return eventId;
@@ -67,7 +75,7 @@ export type AuditRow = AuditEvent & { event_id: string; seq: string; ts: Date };
 /** One session's timeline, oldest first. The only read shape there is. */
 export async function timeline(sql: Sql, sessionId: string): Promise<AuditRow[]> {
   const { rows } = await sql.query<AuditRow>(
-    `select event_id, seq, ts, session_id, mandate_id, actor, action, outcome,
+    `select event_id, seq, ts, gate_version, session_id, mandate_id, actor, action, outcome,
             session_status_at_event, reason_code, reason_human, evidence
        from audit_event
       where session_id = $1

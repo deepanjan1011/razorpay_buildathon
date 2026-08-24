@@ -276,7 +276,22 @@ export async function completeSession(
         session_status_at_event: row.status,
         reason_code: verdict.reason_code,
         reason_human: verdict.reason_human,
-        evidence: { cart_total_minor: total, currency: session.currency, categories: cartCategories },
+        gate_version: verdict.gate_version,
+        evidence: {
+          cart_total_minor: total,
+          currency: session.currency,
+          categories: cartCategories,
+          // EVERY PEER, PASSED AND FAILED. The response carries ONE code; the
+          // record carries the whole evaluation, which is what removes
+          // order-dependence from the trail. The passed set is evidence in a
+          // dispute — "the ceiling, the category and the item count were
+          // within bounds" is a statement, and silence is not.
+          peers_evaluated: verdict.peers_evaluated,
+          peers_failed: verdict.peers
+            .filter((p) => p.reason_code)
+            .map((p) => ({ check: p.check, reason_code: p.reason_code })),
+          peers_passed: verdict.peers.filter((p) => !p.reason_code).map((p) => p.check),
+        },
       });
       const current: CheckoutSession = { id: sessionId, ...session, status: row.status };
       return {
@@ -297,7 +312,16 @@ export async function completeSession(
       session_status_at_event: row.status,
       reason_code: null,
       reason_human: null,
-      evidence: { cart_total_minor: total },
+      gate_version: verdict.gate_version,
+      evidence: {
+        cart_total_minor: total,
+        // Recorded on the ALLOWED path too. An authorisation that says only
+        // "allowed" cannot be audited: WHAT WAS CHECKED is the evidence that
+        // it was checked at all, and a trail that only explains refusals
+        // cannot answer the question a dispute actually asks.
+        peers_evaluated: verdict.peers_evaluated,
+        peers_passed: verdict.peers.filter((p) => !p.reason_code).map((p) => p.check),
+      },
     });
   }
 

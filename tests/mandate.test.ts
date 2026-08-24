@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 
 import { verifyMandate } from "../lib/mandate/verify.ts";
 import type { GateInput } from "../lib/mandate/verify.ts";
+import { GATE_VERSION, PEER_ORDER } from "../lib/mandate/schema.ts";
 import type { Mandate } from "../lib/mandate/schema.ts";
 
 const NOW = new Date("2026-08-24T10:00:00Z");
@@ -291,6 +292,193 @@ describe("every refusal is machine-readable AND human-readable", () => {
         closed.has(r.acp_code),
         `${r.reason_code} maps to ${r.acp_code}, which is not in MessageError.code`,
       );
+    }
+  });
+});
+
+describe("preconditions stop evaluation; peers do not", () => {
+  test("a precondition records that NO peer ran, which is not the same as none failing", () => {
+    // `peers: []` with `peers_evaluated: true` would mean every peer passed.
+    // With `peers_evaluated: false` it means the question was never asked. A
+    // reader of the trail must not have to guess which one silence meant.
+    for (const over of [
+      { mandate: null },
+      { signatureValid: false },
+      { cart: { total_minor: 1, currency: "USD", categories: ["footwear" as const], item_count: 1 } },
+    ]) {
+      const v = verifyMandate(input(over));
+      assert.equal(v.ok, false);
+      assert.equal(v.peers_evaluated, false, JSON.stringify(over));
+      assert.deepEqual(v.peers, []);
+    }
+  });
+
+  test("an unsigned mandate never has its ceiling evaluated at all", () => {
+    // Not merely "not reported" — not COMPUTED. A ceiling comparison against
+    // unauthenticated bytes is meaningless, and recording that it passed would
+    // be a claim about evidence we do not have.
+    const v = verifyMandate(
+      input({
+        signatureValid: false,
+        cart: { total_minor: 9_999_999, currency: "INR", categories: ["apparel"], item_count: 99 },
+      }),
+    );
+    assert.equal(v.ok, false);
+    assert.equal(v.reason_code, "MANDATE_SIGNATURE_INVALID");
+    assert.equal(v.peers.length, 0);
+  });
+});
+
+describe("the peer order is pinned, not documented", () => {
+  // A mandate failing SEVERAL peers at once. Reorder PEER_ORDER and this fails.
+  const everythingWrong = () =>
+    input({
+      now: new Date("2026-08-24T11:30:00Z"), // window: expired
+      consumed: true, // single_use: spent
+      mandate: mandate({
+        constraints: {
+          max_amount: { value: 1000, currency: "INR" }, // ceiling: exceeded
+          categories: ["food"], // category: not permitted
+          max_items: 1, // item_count: exceeded
+          single_use: true,
+        },
+      }),
+      cart: { total_minor: 250000, currency: "INR", categories: ["footwear"], item_count: 5 },
+    });
+
+  test("all five peers fail, and the response names the first in PEER_ORDER", () => {
+    const v = verifyMandate(everythingWrong());
+    assert.equal(v.ok, false);
+    assert.equal(v.peers.filter((p) => p.reason_code).length, 5, "all five must actually fail");
+    assert.equal(v.reason_code, "MANDATE_EXPIRED", "validity_window is first in PEER_ORDER");
+  });
+
+  test("the recorded evaluation is in PEER_ORDER regardless of what failed", () => {
+    assert.deepEqual(
+      verifyMandate(everythingWrong()).peers.map((p) => p.check),
+      [...PEER_ORDER],
+    );
+    assert.deepEqual(verifyMandate(input()).peers.map((p) => p.check), [...PEER_ORDER]);
+  });
+
+  test("removing the first failure surfaces the next, in order", () => {
+    // Walks the order by fixing one peer at a time. This is what makes the
+    // ordering an assertion rather than a comment.
+    const base = everythingWrong();
+    const expected = [
+      "MANDATE_EXPIRED",
+      "MANDATE_ALREADY_CONSUMED",
+      "MANDATE_CEILING_EXCEEDED",
+      "MANDATE_CATEGORY_NOT_PERMITTED",
+      "MANDATE_ITEM_COUNT_EXCEEDED",
+    ];
+    const fixes: Array<(i: GateInput) => GateInput> = [
+      (i) => ({ ...i, now: NOW }),
+      (i) => ({ ...i, consumed: false }),
+      (i) => ({
+        ...i,
+        mandate: mandate({ constraints: { ...i.mandate!.constraints, max_amount: { value: 10_000_000, currency: "INR" } } }),
+      }),
+      (i) => ({ ...i, mandate: mandate({ constraints: { ...i.mandate!.constraints, categories: ["footwear"] } }) }),
+    ];
+
+    let current = base;
+    for (let step = 0; step < expected.length; step++) {
+      const v = verifyMandate(current);
+      assert.equal(v.ok, false);
+      assert.equal(v.reason_code, expected[step], `step ${step}`);
+      if (step < fixes.length) current = fixes[step]!(current);
+    }
+  });
+});
+
+describe("all thirty-two peer combinations", () => {
+  // Five independent peers is 2^5 states. Enumerated rather than sampled,
+  // because the property being asserted — that the response is a function of
+  // the failure SET and not of evaluation order — is exactly the kind of thing
+  // that holds for the cases someone thought to write and breaks for the rest.
+  //
+  // WHAT THIS SUITE CANNOT DO, said plainly: it derives the expected code from
+  // PEER_ORDER, so reordering PEER_ORDER reorders the expectation too and every
+  // case still passes. A test written from a rule cannot falsify that rule
+  // (CLAUDE.md). The order is pinned by the hand-written sequence in the
+  // describe above, which hardcodes the codes; verified by reordering
+  // PEER_ORDER and watching exactly those tests fail.
+  //
+  // What this suite DOES assert is orthogonal to order and is the thing 32
+  // cases are for: the response is deterministic given a failure set, and the
+  // recorded set is exactly complete — no peer missing, none invented.
+  const build = (fails: Record<string, boolean>): GateInput =>
+    input({
+      now: fails["validity_window"] ? new Date("2026-08-24T11:30:00Z") : NOW,
+      consumed: Boolean(fails["single_use"]),
+      mandate: mandate({
+        constraints: {
+          max_amount: { value: fails["ceiling"] ? 1000 : 10_000_000, currency: "INR" },
+          ...(fails["category"] ? { categories: ["food" as const] } : {}),
+          ...(fails["item_count"] ? { max_items: 1 } : {}),
+          single_use: true,
+        },
+      }),
+      cart: {
+        total_minor: 250000,
+        currency: "INR",
+        categories: ["footwear"],
+        item_count: fails["item_count"] ? 5 : 1,
+      },
+    });
+
+  const CODE_OF: Record<string, string> = {
+    validity_window: "MANDATE_EXPIRED",
+    single_use: "MANDATE_ALREADY_CONSUMED",
+    ceiling: "MANDATE_CEILING_EXCEEDED",
+    category: "MANDATE_CATEGORY_NOT_PERMITTED",
+    item_count: "MANDATE_ITEM_COUNT_EXCEEDED",
+  };
+
+  for (let mask = 0; mask < 32; mask++) {
+    const failing = PEER_ORDER.filter((_, i) => (mask & (1 << i)) !== 0);
+    const label = failing.length === 0 ? "none failing" : failing.join("+");
+
+    test(`${label}`, () => {
+      const fails = Object.fromEntries(failing.map((c) => [c, true]));
+      const v = verifyMandate(build(fails));
+
+      if (failing.length === 0) {
+        assert.equal(v.ok, true);
+      } else {
+        assert.equal(v.ok, false);
+        // Deterministic: the first failing check in PEER_ORDER, always.
+        assert.equal(v.reason_code, CODE_OF[failing[0]!]);
+      }
+
+      // COMPLETE: every peer appears exactly once, and the failed set is
+      // exactly the intended one — no more, no fewer, whatever the order.
+      assert.deepEqual(v.peers.map((p) => p.check), [...PEER_ORDER]);
+      assert.deepEqual(
+        v.peers.filter((p) => p.reason_code).map((p) => p.check).sort(),
+        [...failing].sort(),
+      );
+      assert.equal(v.peers_evaluated, true);
+      assert.equal(v.gate_version, GATE_VERSION);
+    });
+  }
+});
+
+describe("the gate is deterministic", () => {
+  test("the same input twice produces byte-identical output", () => {
+    // The guard against anything non-deterministic quietly entering the gate —
+    // a Date.now(), a Math.random, an iteration over a Set built from a Map.
+    for (const over of [
+      {},
+      { consumed: true },
+      { signatureValid: false },
+      { now: new Date("2026-08-24T11:30:00Z") },
+      { cart: { total_minor: 300001, currency: "INR", categories: ["footwear" as const, "apparel" as const], item_count: 3 } },
+    ]) {
+      const a = JSON.stringify(verifyMandate(input(over)));
+      const b = JSON.stringify(verifyMandate(input(over)));
+      assert.equal(a, b, JSON.stringify(over));
     }
   });
 });

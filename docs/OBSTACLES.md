@@ -2464,3 +2464,80 @@ confirms the session exists and tells an enumerating caller which ids are real.
 Deliberately NOT built: scopes, rotation, an agent-to-buyer binding, delegation.
 This is a signed-credential check, not an identity system, and Phase 4's gate
 does not run through any of them.
+
+---
+
+## 2026-08-24 — Order-dependence removed from the record, not just documented
+
+The previous entry stated a rule — order checks by which answer is most useful —
+and left it as a convention in a comment. On this project a convention in the
+money path gets enforced in code: the eval's refusals, the audit check
+constraint, the static route test. Execution order had no business being the
+exception.
+
+### Preconditions are not peers, and the difference is not stylistic
+
+The rule as written was missing a distinction. **Signature is not a peer of
+ceiling.** If the signature does not verify, the mandate's contents are
+unauthenticated bytes, and computing a ceiling comparison from them is not
+merely impolite — it is meaningless. Recording that the ceiling "passed" would
+be a claim about evidence that does not exist.
+
+So a precondition short-circuits EVALUATION: missing mandate, bad signature,
+unreadable validity window, and currency mismatch. Currency belongs here rather
+than beside the ceiling for the same reason: comparing 300000 paise against
+300000 cents is a number that looks fine and means nothing, so the ceiling is
+not evaluated, and saying it passed would assert a comparison never made.
+
+The other five — validity window, single use, ceiling, category, item count —
+are peers. All can be true simultaneously, all are evaluated against trusted
+contents, and **picking one to record is an arbitrary choice dressed as a
+decision.**
+
+### Short-circuit the response, not the record
+
+The caller still gets exactly one reason code: minimal, and no enumeration of
+everything else wrong with a mandate somebody may be probing.
+
+The audit event records every peer that failed AND every peer that passed. That
+is what removes order-dependence from the trail — the recorded outcome stops
+being a function of the order the checks happen to run in.
+
+**The passed set is evidence.** In a dispute, "the ceiling, the category and the
+item count were within bounds" is a statement; silence is not. It is recorded on
+the ALLOWED path too, because an authorisation that says only `allowed` cannot
+be audited — what was checked is the evidence that anything was checked at all.
+
+`peers_evaluated: false` is deliberately distinct from an empty `peers` list.
+"No peer failed" and "no peer ran" are different facts and a reader must not
+have to guess which one silence meant.
+
+### `gate_version` on every row
+
+The one that addresses "later might become questionable". If the check set or
+the order ever changes — a refactor, a new constraint in Phase 5 — rows written
+before and after mean different things about identical situations, and nothing
+in the trail would say so. A reader two years out cannot tell whether a mandate
+passed because it was compliant or because the rule did not exist yet.
+
+Not null with a default naming the policy in force when the column was added,
+rather than backfilling a claim about rows written before it existed.
+
+### The enumeration cannot pin the order, and says so
+
+Thirty-two combinations assert two properties: the response code is
+deterministic given a failure set, and the recorded set is exactly complete —
+no peer missing, none invented. Plus same-input-twice byte-identical output, as
+a guard against anything non-deterministic entering the gate.
+
+**What it cannot do, written into the test rather than left to be discovered:**
+it derives the expected code FROM `PEER_ORDER`, so reordering `PEER_ORDER`
+reorders the expectation and all thirty-two still pass. A test written from a
+rule cannot falsify that rule — the Phase 1 lesson, arriving in a suite that
+looks exhaustive.
+
+The order is pinned by a separate hand-written sequence that hardcodes the
+codes and walks the list by fixing one peer at a time. Verified by swapping two
+entries in `PEER_ORDER`: exactly those two tests fail and the thirty-two do not,
+which is the demonstration that the coverage is real and that its limits are
+where they are claimed to be.
