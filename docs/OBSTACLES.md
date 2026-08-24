@@ -1887,3 +1887,64 @@ Every row on this fixture maps to `food`, so `category` reads 100% and measures
 nothing. The document now DETECTS single-valued fields and says so itself,
 rather than relying on anyone remembering. A second sheet from a different
 trade is the fix, and is deferred: twelve days left and Phases 3-6 ahead.
+
+---
+
+## 2026-08-24 — `PRICE_AMBIGUOUS`: flagging without resolving, and the rule the real sheet could not test
+
+The last open defect on the closed Phase 1 gate. Seven of 78 rows quote a rate
+per unit of MEASURE beside a pack that is not that unit — `₹ 100/Kg` against a
+250g pack of adhirasam. Either ₹100 buys the pack or it buys a kilo, and the
+sheet does not say.
+
+### The temptation was to resolve it, and that is the wrong direction
+
+250/1000 × ₹100 = ₹25 is arithmetic the merchant never wrote. It would publish
+an invented price on the one path where being confidently wrong costs real
+money, and it would look right — a plausible number with no flag on it. This is
+the withholding-versus-guessing question from CLAUDE.md, and on the money path
+guessing is strictly worse: a withheld row is a merchant answering a question,
+a guessed row is a buyer charged a figure nobody stated.
+
+So the pipeline flags and holds. The merchant's own ₹100 is kept for them to
+look at in review; what is withheld is the *claim that it is a pack price*.
+
+### Keeping the rule narrow, so it withholds a minority
+
+`PRICE_AMBIGUOUS` here fires only when the sheet states BOTH a measure rate and
+a pack smaller than that unit. A kilo rate with **no** pack size stated is a
+kilo being sold, and is left alone.
+
+Without that second condition every merchant who prices by weight gets an empty
+feed — the exact failure this project has already shipped three times
+(`CURRENCY_ASSUMED`, `CATEGORY_UNMAPPED`, unknown stock). Trigger rate on the
+real sheet: 7 of 78, a clear minority.
+
+### The real sheet cannot test the half that matters
+
+Every per-Kg row on it also states a smaller pack. **There is no
+counter-example on the real sheet**, so a rule that fired on *every* per-Kg
+price would have scored an identical 7/7 and looked equally correct.
+
+`messy-12-measure-rates.xlsx` supplies the counter-examples, and they are the
+point of the case rather than an afterthought: a kilo rate with no pack, a pack
+that IS exactly the quoted unit (`₹ 550/Kg`, `1 kg`), a sale-unit rate
+(`₹ 57/Pack`), and a volume rate against a mass pack, which must flag for a
+different reason.
+
+### 470/470, and why that is a weaker claim than it looks
+
+The score is now perfect, which is the moment to be most careful.
+`price_ambiguous_flagged` reads 7/7 because a rule and the labels that check it
+were **written by the same hand in the same change** — they agree with each
+other, and that is not evidence. What actually constrains this rule is the five
+committed rows it must NOT flag.
+
+The document now says so itself: any perfect score renders a caution that it
+means *nothing left that these labels can detect*, and points at the fixtures
+holding each rule's counter-examples. Generated, not remembered.
+
+### Published
+
+95% → 99% → 100%, every run in the history table with its prompt fingerprint
+and the change that produced it.

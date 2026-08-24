@@ -14,8 +14,72 @@ export type PriceParse = {
   amount_minor: number | null;
   /** A struck-through / MRP figure found alongside the price, if any. */
   compare_at_minor: number | null;
+  /**
+   * The unit the price is quoted PER, verbatim, when the cell names one:
+   * "Pack" from `₹ 57/Pack`, "Kg" from `₹ 100/Kg`. null when the cell names no
+   * unit — including `Rs. 1,299/-`, where the slash is punctuation and not a
+   * rate. Reported, never acted on here: whether a per-Kg rate is ambiguous
+   * depends on the pack size, which lives in another cell.
+   */
+  rate_unit: string | null;
   flags: NormalizationFlag[];
 };
+
+/**
+ * A quantity with a unit, normalised to a base so two can be compared.
+ *
+ * Mass in grams, volume in millilitres. Returns null rather than guessing when
+ * the text names no unit we know — an unrecognised unit is not a zero.
+ */
+const UNIT_BASE: Record<string, { dimension: "mass" | "volume"; factor: number }> = {
+  kg: { dimension: "mass", factor: 1000 },
+  kgs: { dimension: "mass", factor: 1000 },
+  kilo: { dimension: "mass", factor: 1000 },
+  kilos: { dimension: "mass", factor: 1000 },
+  kilogram: { dimension: "mass", factor: 1000 },
+  kilograms: { dimension: "mass", factor: 1000 },
+  g: { dimension: "mass", factor: 1 },
+  gm: { dimension: "mass", factor: 1 },
+  gms: { dimension: "mass", factor: 1 },
+  gram: { dimension: "mass", factor: 1 },
+  grams: { dimension: "mass", factor: 1 },
+  l: { dimension: "volume", factor: 1000 },
+  ltr: { dimension: "volume", factor: 1000 },
+  litre: { dimension: "volume", factor: 1000 },
+  litres: { dimension: "volume", factor: 1000 },
+  liter: { dimension: "volume", factor: 1000 },
+  liters: { dimension: "volume", factor: 1000 },
+  ml: { dimension: "volume", factor: 1 },
+};
+
+export type Quantity = { dimension: "mass" | "volume"; base: number };
+
+export function parseQuantity(raw: unknown): Quantity | null {
+  const text = asText(raw);
+  // Match the number AND its unit together. Matching them separately would
+  // pair the 150 of "150 g" with a "kg" appearing elsewhere in the cell.
+  const m = /(\d+(?:\.\d+)?)\s*([A-Za-z]+)/.exec(text.replace(/,/g, ""));
+  if (!m) return null;
+  const unit = UNIT_BASE[m[2]!.toLowerCase()];
+  if (!unit) return null;
+  const value = Number(m[1]);
+  if (!Number.isFinite(value)) return null;
+  return { dimension: unit.dimension, base: value * unit.factor };
+}
+
+/** The unit a rate is quoted per, if the text names one. */
+export function rateUnitOf(text: string): string | null {
+  // `[A-Za-z]` deliberately: `Rs. 1,299/-` must NOT read "-" as a unit.
+  const m = /(?:\/|\bper\b)\s*([A-Za-z]+)/i.exec(text);
+  return m?.[1] ?? null;
+}
+
+/** A rate quoted per a unit of MEASURE, as opposed to per a sale unit. */
+export function measureRate(unit: string | null): Quantity | null {
+  if (unit === null) return null;
+  const known = UNIT_BASE[unit.toLowerCase()];
+  return known ? { dimension: known.dimension, base: known.factor } : null;
+}
 
 export type StockParse = {
   availability: "in_stock" | "out_of_stock" | "unknown";
@@ -81,9 +145,11 @@ function toMinor(token: string): { minor: number | null; imprecise: boolean } {
 export function parsePrice(raw: unknown): PriceParse {
   const text = asText(raw);
   const flags: NormalizationFlag[] = [];
+  const rate_unit = rateUnitOf(text);
   const missing = (): PriceParse => ({
     amount_minor: null,
     compare_at_minor: null,
+    rate_unit,
     flags: [...flags, "MISSING_REQUIRED_FIELD"],
   });
 
@@ -92,7 +158,7 @@ export function parsePrice(raw: unknown): PriceParse {
   if (RANGE.test(text)) {
     // Picking an end of a range is a guess that silently changes what the buyer
     // pays. Refuse and send it to review.
-    return { amount_minor: null, compare_at_minor: null, flags: ["PRICE_AMBIGUOUS"] };
+    return { amount_minor: null, compare_at_minor: null, rate_unit, flags: ["PRICE_AMBIGUOUS"] };
   }
 
   if (!CURRENCY_MARKER.test(text)) flags.push("CURRENCY_ASSUMED");
@@ -118,7 +184,7 @@ export function parsePrice(raw: unknown): PriceParse {
     }
   }
 
-  return { amount_minor: price.minor, compare_at_minor, flags };
+  return { amount_minor: price.minor, compare_at_minor, rate_unit, flags };
 }
 
 // ---------------------------------------------------------------------------

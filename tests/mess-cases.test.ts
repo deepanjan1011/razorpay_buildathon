@@ -19,6 +19,22 @@ import {
   splitList,
   hasIndicScript,
 } from "../lib/ingest/cells.ts";
+import { normalizeSheet } from "../lib/normalize/normalize.ts";
+import type { RowExtraction } from "../lib/normalize/llm-schema.ts";
+
+/** A model extraction that asserts nothing, so the deterministic layer is what is under test. */
+const extraction = (over: { source_row: number; title: string }): RowExtraction => ({
+  description: null,
+  brand: null,
+  category: "food",
+  category_confidence: 1,
+  variant_group: null,
+  options: {},
+  attributes: {},
+  confidence: 1,
+  title_inferred: false,
+  ...over,
+});
 
 const fixture = (name: string) => join(import.meta.dirname, "..", "fixtures", name);
 
@@ -389,5 +405,65 @@ describe("§4.11 — a sheet where every cell is text, no typed numbers anywhere
     assert.ok(first);
     assert.equal(first.cells["Price"], "₹ 57/Pack");
     assert.equal(first.cells["Product"], "Mixture 150gm");
+  });
+});
+
+describe("§4.12 — a price quoted per unit of measure, beside a pack that is not that unit", () => {
+  // "₹ 100/Kg" on a 250g pack is either ₹100 for the pack or ₹25 of a kilo
+  // rate, and the sheet does not choose. The pipeline must not choose either:
+  // computing 250/1000 × ₹100 invents a price the merchant never wrote, on the
+  // one path where being confidently wrong costs real money.
+  //
+  // The rows that must NOT flag are the point of this case. Every per-Kg row on
+  // the real sheet also states a smaller pack, so the real sheet cannot catch a
+  // rule that fires on all of them — and such a rule empties the feed of every
+  // merchant who sells by weight.
+  const expected: Array<[string, boolean]> = [
+    ["Adhirasam", true],
+    ["Kara Boondi", true],
+    ["Sesame Oil Sachet", true], // a volume rate cannot price a mass pack
+    ["Loose Rice", false], // a kilo rate with no pack stated IS the kilo
+    ["Ghee Tin", false], // the pack is exactly the unit quoted
+    ["Cooking Oil", false],
+    ["Murukku", false], // "Pack" is a sale unit, not a unit of measure
+    ["Fryums", false],
+  ];
+
+  for (const [item, ambiguous] of expected) {
+    test(`${item} is ${ambiguous ? "" : "not "}ambiguous`, async () => {
+      const [sheet] = await parseWorkbook(fixture("messy-12-measure-rates.xlsx"));
+      assert.ok(sheet);
+      const row = sheet.rows.find((r) => r.cells["Item"] === item);
+      assert.ok(row, `${item} missing from the fixture`);
+
+      const variant = normalizeSheet(
+        sheet,
+        [extraction({ source_row: row.row, title: item })],
+        { merchantId: "mer_t", sourceFile: "t.xlsx" },
+      )
+        .flatMap((p) => p.variants)
+        .find((v) => v.provenance.source_row === row.row);
+
+      assert.ok(variant);
+      assert.equal(variant.normalization.flags.includes("PRICE_AMBIGUOUS"), ambiguous);
+    });
+  }
+
+  test("an ambiguous row is held for review, not repriced", async () => {
+    const [sheet] = await parseWorkbook(fixture("messy-12-measure-rates.xlsx"));
+    assert.ok(sheet);
+    const row = sheet.rows.find((r) => r.cells["Item"] === "Adhirasam");
+    assert.ok(row);
+    const variant = normalizeSheet(
+      sheet,
+      [extraction({ source_row: row.row, title: "Adhirasam" })],
+      { merchantId: "mer_t", sourceFile: "t.xlsx" },
+    ).flatMap((p) => p.variants)[0];
+
+    assert.ok(variant);
+    assert.ok(variant.normalization.needs_review);
+    // ₹100 as written, NOT 250/1000 × ₹100 = ₹25. The merchant's figure is kept
+    // for them to look at; what is withheld is the claim that it is a pack price.
+    assert.equal(variant.price.amount_minor, 10000);
   });
 });

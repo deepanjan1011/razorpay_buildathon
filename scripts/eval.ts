@@ -320,6 +320,18 @@ across **${labelled.length} hand-labelled products** from a real merchant sheet.
 
 At n=${overall.total} observations, treat this as an estimate. It is one
 catalogue from one source, not a population.
+${
+  overall.ok < overall.total
+    ? ""
+    : `
+**A perfect score is a claim about this fixture, not about the pipeline.** Read
+it as *nothing left that these labels can detect*, which is a weaker statement
+than it looks: the labels and the pipeline are written by the same hand, so a
+rule and the labels that check it can agree without either being right. What
+makes a field trustworthy is a case the labels never covered — see the committed
+\`messy-*\` fixtures for the counter-examples each rule must survive.
+`
+}
 
 ${
   singleValued.length === 0

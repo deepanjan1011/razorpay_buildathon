@@ -11,7 +11,7 @@
  * substring — `price` as a substring would match `MRP` and quietly pick the
  * wrong column.
  */
-export type FieldRole = "price" | "list_price" | "stock";
+export type FieldRole = "price" | "list_price" | "stock" | "pack_size";
 
 const SYNONYMS: Record<FieldRole, string[]> = {
   price: [
@@ -27,6 +27,17 @@ const SYNONYMS: Record<FieldRole, string[]> = {
     "விலை",
   ],
   list_price: ["mrp", "m.r.p", "m.r.p.", "list price", "retail price", "compare at"],
+  // Narrow on purpose. A bare "size" is an apparel size, not a pack quantity,
+  // and reading one as the other would compare a shoe size against a kilo.
+  pack_size: [
+    "pack size",
+    "packaging size",
+    "net quantity",
+    "net weight",
+    "pack weight",
+    "weight",
+    "packing",
+  ],
   stock: [
     "stock",
     "in stock",

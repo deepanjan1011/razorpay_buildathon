@@ -310,6 +310,39 @@ const case11: SheetSpec[] = [
   },
 ];
 
+
+/**
+ * Case 12 — a price quoted per unit of MEASURE, beside a pack that is not that
+ * unit. Observed on the first real merchant sheet, where seven of 78 rows read
+ * "₹ 57/Kg" against a 150g pack.
+ *
+ * The rows that matter here are the ones that must NOT flag. A rule that fires
+ * on every per-Kg price would empty the feed of any merchant who sells by
+ * weight, and the real sheet contains no counter-example to catch that — every
+ * per-Kg row on it also states a smaller pack. These do.
+ */
+const case12: SheetSpec[] = [
+  {
+    name: "Rates",
+    rows: [
+      ["Item", "Price", "Pack Size"],
+      // Ambiguous: the rate and the pack disagree, so neither states a pack price.
+      ["Adhirasam", "\u20b9 100/Kg", "250 g"],
+      ["Kara Boondi", "\u20b9 57/Kg", "150g"],
+      // NOT ambiguous: a kilo rate with no pack stated is a kilo being sold.
+      ["Loose Rice", "\u20b9 60/Kg", null],
+      // NOT ambiguous: the pack IS the unit the rate is quoted in.
+      ["Ghee Tin", "\u20b9 550/Kg", "1 kg"],
+      ["Cooking Oil", "\u20b9 140/Litre", "1 litre"],
+      // NOT ambiguous: a sale unit is not a unit of measure.
+      ["Murukku", "\u20b9 57/Pack", "150 g"],
+      ["Fryums", "\u20b9 23/Packet", "50g"],
+      // Ambiguous across dimensions: a volume rate cannot price a mass pack.
+      ["Sesame Oil Sachet", "\u20b9 200/Litre", "100 g"],
+    ],
+  },
+];
+
 const FIXTURES: Array<[string, SheetSpec[]]> = [
   ["messy-01-preamble.xlsx", case01],
   ["messy-02-headers.xlsx", case02],
@@ -322,6 +355,7 @@ const FIXTURES: Array<[string, SheetSpec[]]> = [
   ["messy-09-duplicates.xlsx", case09],
   ["messy-10-stock.xlsx", case10],
   ["messy-11-all-text.xlsx", case11],
+  ["messy-12-measure-rates.xlsx", case12],
 ];
 
 for (const [file, sheets] of FIXTURES) await write(file, sheets);

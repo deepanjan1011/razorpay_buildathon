@@ -12,7 +12,14 @@
  */
 import { createHash } from "node:crypto";
 
-import { hasIndicScript, parsePrice, parseStock, splitList } from "../ingest/cells.ts";
+import {
+  hasIndicScript,
+  measureRate,
+  parsePrice,
+  parseQuantity,
+  parseStock,
+  splitList,
+} from "../ingest/cells.ts";
 import { findField } from "../ingest/fields.ts";
 import type { ParsedSheet, RawRow } from "../ingest/parse.ts";
 import { needsReview } from "./flags.ts";
@@ -101,6 +108,7 @@ function variantsForRow(
   const priceField = findField(sheet.headers, "price");
   const listField = findField(sheet.headers, "list_price");
   const stockField = findField(sheet.headers, "stock");
+  const packField = findField(sheet.headers, "pack_size");
 
   const parsed = parsePrice(priceField === null ? null : row.cells[priceField]);
   const stock = parseStock(stockField === null ? null : row.cells[stockField]);
@@ -137,6 +145,32 @@ function variantsForRow(
   // per-row uncertainty worth a human glance.
   if (stock.availability === "unknown") {
     baseFlags.push(stockField === null ? "STOCK_NOT_TRACKED" : "STOCK_UNKNOWN");
+  }
+
+  // A MEASURE RATE BESIDE A SMALLER PACK DOES NOT STATE A PACK PRICE.
+  //
+  // "₹ 100/Kg" on a 250g pack of adhirasam is either ₹100 for the pack or ₹25
+  // of a kilo rate, and the sheet does not choose. Seven rows on the first real
+  // merchant sheet are like this, and every one of them parsed to a confident
+  // number — which the old `amount_minor > 0` check scored as CORRECT.
+  //
+  // WE DO NOT RESOLVE IT. Computing 250/1000 × ₹100 would invent a price the
+  // merchant never wrote, on the one path where being confidently wrong costs
+  // real money. Flag and hold for review; the merchant answers, not us.
+  //
+  // Deliberately narrow, so it withholds a minority: it fires only when the
+  // sheet states BOTH a measure rate and a smaller pack. A price quoted per
+  // kilo with no pack size stated is a kilo being sold, and is left alone —
+  // otherwise every merchant who sells by weight gets an empty feed, which is
+  // the failure this project has already made three times.
+  const packQuantity = packField === null ? null : parseQuantity(row.cells[packField]);
+  const rate = measureRate(parsed.rate_unit);
+  const rateDisagreesWithPack =
+    rate !== null &&
+    packQuantity !== null &&
+    (rate.dimension !== packQuantity.dimension || packQuantity.base < rate.base);
+  if (rateDisagreesWithPack && !baseFlags.includes("PRICE_AMBIGUOUS")) {
+    baseFlags.push("PRICE_AMBIGUOUS");
   }
 
   // Script detection is deterministic; transliteration is not, so a Tamil-script

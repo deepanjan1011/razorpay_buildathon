@@ -5,11 +5,19 @@ Regenerate whenever the pipeline, the prompt or the provider changes.
 
 ## The number
 
-**463 / 470 field observations correct (99%)**
+**470 / 470 field observations correct (100%)**
 across **78 hand-labelled products** from a real merchant sheet.
 
 At n=470 observations, treat this as an estimate. It is one
 catalogue from one source, not a population.
+
+**A perfect score is a claim about this fixture, not about the pipeline.** Read
+it as *nothing left that these labels can detect*, which is a weaker statement
+than it looks: the labels and the pipeline are written by the same hand, so a
+rule and the labels that check it can agree without either being right. What
+makes a field trustworthy is a case the labels never covered — see the committed
+`messy-*` fixtures for the counter-examples each rule must survive.
+
 
 **Measures nothing on this fixture:** `category` (every labelled row is `food`). A field with one
 distinct label reads 100% regardless of what the pipeline does, and must not be
@@ -25,52 +33,19 @@ more rows from this one.
 | `size` | 75/75 | 100% |
 | `price_parsed` | 69/69 | 100% |
 | `colour` | 7/7 | 100% |
-| `price_ambiguous_flagged` | 0/7 | 0% |
+| `price_ambiguous_flagged` | 7/7 | 100% |
 
 ## Review queue
 
-2 of 78 variants need merchant review.
+9 of 78 variants need merchant review.
 
 - `STOCK_NOT_TRACKED` — 78
+- `PRICE_AMBIGUOUS` — 7
 - `MISSING_REQUIRED_FIELD` — 2
 
 ## Every failure
 
-**row 24 — `price_ambiguous_flagged`**
-- sheet said: `Peanut laddu 150 gram | ₹ 65/Kg | 150 gram`
-- we produced: `STOCK_NOT_TRACKED`
-- expected: `PRICE_AMBIGUOUS`
-
-**row 25 — `price_ambiguous_flagged`**
-- sheet said: `Sweets | Peanut Barfi | ₹ 40/Kg | 100 g | 2Months`
-- we produced: `STOCK_NOT_TRACKED`
-- expected: `PRICE_AMBIGUOUS`
-
-**row 29 — `price_ambiguous_flagged`**
-- sheet said: `Sweets | Adhirasam Sweet | ₹ 100/Kg | 250 g | 45 days`
-- we produced: `STOCK_NOT_TRACKED`
-- expected: `PRICE_AMBIGUOUS`
-
-**row 36 — `price_ambiguous_flagged`**
-- sheet said: `Chips | Garlic Chips | ₹ 28/Kg | 50 gm | 30 days`
-- we produced: `STOCK_NOT_TRACKED`
-- expected: `PRICE_AMBIGUOUS`
-
-**row 52 — `price_ambiguous_flagged`**
-- sheet said: `Banana Chips | Yellow Banana Chips | ₹ 115/Kg | 200g`
-- we produced: `STOCK_NOT_TRACKED`
-- expected: `PRICE_AMBIGUOUS`
-
-**row 73 — `price_ambiguous_flagged`**
-- sheet said: `Kara Boondi | 150g Spicy Kara Boondi | ₹ 57/Kg | 150g | 60 Days`
-- we produced: `STOCK_NOT_TRACKED`
-- expected: `PRICE_AMBIGUOUS`
-
-**row 76 — `price_ambiguous_flagged`**
-- sheet said: `Bitter Gourd Chips | 100g Bitter Guard Chips | ₹ 57/Kg | 100g | 60 Days`
-- we produced: `STOCK_NOT_TRACKED`
-- expected: `PRICE_AMBIGUOUS`
-
+None. At this sample size that means *no failures observed*, not *does not fail*.
 
 ## Run history
 
@@ -83,6 +58,8 @@ than a number standing alone: it shows what the eval actually caught.
 | 2026-08-24 | `gemini-3.5-flash` | `2a528b50a1bc` | 463/470 (99%) | title rule rewritten: reproduce the merchant wording, expand shorthand only |
 | 2026-08-24 | `gemini-3.5-flash` | `2a528b50a1bc` | 463/470 (99%) | variant identity moved off the model's title onto the merchant's own cells |
 | 2026-08-24 | `gemini-3.5-flash` | `2a528b50a1bc` | 463/470 (99%) | same run; adds automatic detection of fields that cannot discriminate |
+| 2026-08-24 | `gemini-3.5-flash` | `2a528b50a1bc` | 470/470 (100%) | a measure rate beside a smaller pack now flags PRICE_AMBIGUOUS instead of inventing a pack price |
+| 2026-08-24 | `gemini-3.5-flash` | `2a528b50a1bc` | 470/470 (100%) | same pipeline; document now cautions on a perfect score |
 
 ## Run fingerprint
 
@@ -96,9 +73,9 @@ this run; here it is in full.
 | model_requested | `gemini-3.5-flash` |
 | model_served | `gemini-3.5-flash` |
 | prompt_sha256 | `2a528b50a1bcb1c178e524c31ab9eb3c637185ca9e93b17bb41329567e51fbc1` |
-| latency | 64.5s for 78 rows |
+| latency | 54.9s for 78 rows |
 | rows in failed batches | 0 |
-| run_date | 2026-08-24T02:14:49.355Z |
+| run_date | 2026-08-24T02:24:31.311Z |
 
 If `model_served` or `prompt_sha256` differs from a previous run, this number
 is not comparable to that one.

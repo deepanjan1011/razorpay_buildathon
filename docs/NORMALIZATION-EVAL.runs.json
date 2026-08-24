@@ -30,5 +30,21 @@
     "ok": 463,
     "total": 470,
     "note": "same run; adds automatic detection of fields that cannot discriminate"
+  },
+  {
+    "run_date": "2026-08-24T02:23:08.044Z",
+    "model_served": "gemini-3.5-flash",
+    "prompt_sha256": "2a528b50a1bcb1c178e524c31ab9eb3c637185ca9e93b17bb41329567e51fbc1",
+    "ok": 470,
+    "total": 470,
+    "note": "a measure rate beside a smaller pack now flags PRICE_AMBIGUOUS instead of inventing a pack price"
+  },
+  {
+    "run_date": "2026-08-24T02:24:31.311Z",
+    "model_served": "gemini-3.5-flash",
+    "prompt_sha256": "2a528b50a1bcb1c178e524c31ab9eb3c637185ca9e93b17bb41329567e51fbc1",
+    "ok": 470,
+    "total": 470,
+    "note": "same pipeline; document now cautions on a perfect score"
   }
 ]
