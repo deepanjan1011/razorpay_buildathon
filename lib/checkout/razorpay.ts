@@ -34,6 +34,16 @@ export type PaymentLinkResult = {
 
 export type PaymentLinkClient = {
   create(request: PaymentLinkRequest): Promise<PaymentLinkResult>;
+  /**
+   * Cancel a link so it stops being payable.
+   *
+   * Needed because cancelling a checkout session used to leave the link live:
+   * the session read `canceled` while `https://rzp.io/...` still accepted
+   * ₹2,570.40 for thirty minutes. Razorpay refuses to cancel a link that has
+   * been paid, which is the correct answer and is why the caller cancels the
+   * link BEFORE it cancels the session.
+   */
+  cancel(id: string): Promise<{ status: string }>;
 };
 
 /**
@@ -59,35 +69,39 @@ export function expiryFor(now: Date): { at: Date; unix: number } {
  * mistake that spends real money, and the cheapest place to catch it is before
  * the first request rather than in a dashboard afterwards.
  */
+async function razorpay() {
+  // CONFIGURATION IS CHECKED PER CALL, NOT IN THE FACTORY. Constructing the
+  // client used to validate the keys, which meant a missing key threw before
+  // any policy ran — so on a server with no Razorpay credentials EVERY refusal
+  // came back 502 instead of its own 4xx. A wrong handler_id reported "could
+  // not create a payment link", which is both wrong and exactly backwards about
+  // whose fault it is.
+  //
+  // The unit tests could not see it: their fake client never throws, and the
+  // throw was in the argument, not the call. One real request found it.
+  const keyId = process.env["RAZORPAY_KEY_ID"];
+  const keySecret = process.env["RAZORPAY_KEY_SECRET"];
+
+  if (!keyId || !keySecret) {
+    throw new Error(
+      "RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required to create payment links",
+    );
+  }
+  if (!keyId.startsWith("rzp_test_")) {
+    throw new Error(
+      `Refusing to use key ${keyId.slice(0, 12)}…: this project is test mode only ` +
+        "(CLAUDE.md invariant 5)",
+    );
+  }
+
+  const { default: Razorpay } = await import("razorpay");
+  return new Razorpay({ key_id: keyId, key_secret: keySecret });
+}
+
 export function razorpayClient(): PaymentLinkClient {
   return {
     async create(request: PaymentLinkRequest): Promise<PaymentLinkResult> {
-      // CONFIGURATION IS CHECKED HERE, NOT IN THE FACTORY. Constructing the
-      // client used to validate the keys, which meant a missing key threw
-      // before any policy ran — so on a server with no Razorpay credentials
-      // EVERY refusal came back 502 instead of its own 4xx. A wrong handler_id
-      // reported "could not create a payment link", which is both wrong and
-      // exactly backwards about whose fault it is.
-      //
-      // The unit tests could not see it: their fake client never throws, and
-      // the throw was in the argument, not the call. One real request found it.
-      const keyId = process.env["RAZORPAY_KEY_ID"];
-      const keySecret = process.env["RAZORPAY_KEY_SECRET"];
-
-      if (!keyId || !keySecret) {
-        throw new Error(
-          "RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required to create payment links",
-        );
-      }
-      if (!keyId.startsWith("rzp_test_")) {
-        throw new Error(
-          `Refusing to use key ${keyId.slice(0, 12)}…: this project is test mode only ` +
-            "(CLAUDE.md invariant 5)",
-        );
-      }
-
-      const { default: Razorpay } = await import("razorpay");
-      const client = new Razorpay({ key_id: keyId, key_secret: keySecret });
+      const client = await razorpay();
 
       // THE SDK'S TYPE IS WRONG, and wrong in the direction that caused the
       // bug below: `customer` is declared REQUIRED in paymentLink.d.ts, while
@@ -123,6 +137,12 @@ export function razorpayClient(): PaymentLinkClient {
         short_url: String(link.short_url),
         status: String(link.status),
       };
+    },
+
+    async cancel(id: string): Promise<{ status: string }> {
+      const client = await razorpay();
+      const link = (await client.paymentLink.cancel(id)) as { status?: unknown };
+      return { status: String(link.status) };
     },
   };
 }

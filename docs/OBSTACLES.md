@@ -1948,3 +1948,89 @@ holding each rule's counter-examples. Generated, not remembered.
 
 95% → 99% → 100%, every run in the history table with its prompt fingerprint
 and the change that produced it.
+
+---
+
+## 2026-08-24 — `complete` end to end: a cancelled session left a payable link
+
+First run of create → complete → cancel against `next dev`, real Neon and a real
+test-mode Razorpay key. Everything up to `complete` had been verified before;
+the leg past it never had.
+
+### What worked first time
+
+```
+create                                  -> 201 ready_for_payment, total 257040
+complete, handler razorpay_link         -> 200 complete_in_progress
+                                           plink_TTRZWW4znfREn7
+                                           https://rzp.io/rzp/pJN1VrLe
+complete, same Idempotency-Key          -> 200 replayed, SAME link id
+complete, new key, link already live    -> 200 reused, no second link
+GET during the pending window           -> 200 still complete_in_progress
+complete, handler dev.acp.tokenized.card-> 400 unsupported_payment_handler
+update cart while a link is live        -> 400 refused
+```
+
+The reuse path and the GET-does-not-un-complete regression both hold against a
+real database, which previously only unit tests had asserted.
+
+### The defect: cancel marked the session and left the link alive
+
+`cancelSession` set `canceled` and never touched Razorpay. Verified against
+their API rather than inferred:
+
+```
+session cs_2ee77e40c84e47dd8ec69a00 -> canceled
+link    plink_TTRZWW4znfREn7        -> status "created", amount 257040, amount_paid 0
+```
+
+**A cancelled order with a live payable URL.** Anyone holding it could pay
+₹2,570.40 for the remaining thirty minutes, and the webhook would then report a
+payment against a session that says it was cancelled. This is the two-clocks
+problem CLAUDE.md flags for Phase 3, arriving early and in Phase 2.
+
+Fixed by cancelling the link FIRST and the session second. If Razorpay refuses —
+which it does for a link that has been paid — the session is left exactly as it
+was and the caller gets `payment_link_not_cancellable`. Marking it `canceled`
+anyway would claim a cancellation that is not true for an order somebody has
+already paid; that case is a refund, not a cancel. Same shape as invariant 2:
+check first, act second, first failure short-circuits.
+
+Proven end to end afterwards, against the live API:
+
+```
+complete -> link status "created"
+cancel   -> session "canceled", link status "cancelled"
+```
+
+### Why no test could have caught it, again
+
+`cancelSession` never called the client, so there was nothing for a fake to
+observe — the absence of a call is invisible to a test that only inspects the
+calls that happened. The suite was not weak here so much as blind: a missing
+interaction has no fixture. What found it was asking Razorpay what it thought
+the link's status was, which is a question no unit test can ask.
+
+The three tests added now assert the property directly: the link is cancelled,
+a refusal leaves the session alone, and a session with no link never calls
+Razorpay at all.
+
+### An open conformance question, not a bug
+
+ACP's `PaymentData` is `anyOf: [{handler_id, instrument}, {purchase_order_number}]`.
+Our handler declares `requires_delegate_payment: false` — the agent receives a
+URL and no credential is transferred in either direction — so neither branch
+fits. The repo currently uses both conventions: `tests/complete.test.ts` sends
+`instrument.credential.token = "n/a"`, and the live runs above used
+`purchase_order_number`. `completeSession` reads only `handler_id`, so both are
+accepted today.
+
+One of them has to be the documented one. `"n/a"` fabricates a credential that
+does not exist, which is the kind of plausible-looking placeholder this project
+keeps rejecting elsewhere. Recording it as an open decision rather than settling
+it silently.
+
+### Still not done in Phase 2
+
+No traffic from Razorpay has reached the webhook endpoint. Live delivery needs a
+public URL and `RAZORPAY_WEBHOOK_SECRET`, and remains the one untested leg.

@@ -21,6 +21,7 @@ import { lookupVariants } from "../catalog/store.ts";
 import type { CatalogVariant } from "../catalog/store.ts";
 import { computeTotals, lineTotals, totalOf } from "./totals.ts";
 import type { CartLine, Total } from "./totals.ts";
+import type { PaymentLinkClient } from "./razorpay.ts";
 import { ACP_API_VERSION } from "./validate.ts";
 
 /**
@@ -287,11 +288,13 @@ type StoredRow = {
   status: SessionStatus;
   requested: RequestedItem[];
   link_expires_at: Date | null;
+  /** Loaded so `cancelSession` can stop a live link being payable. */
+  payment_link_id: string | null;
 };
 
 async function load(sql: Sql, id: string): Promise<StoredRow | null> {
   const { rows } = await sql.query<StoredRow>(
-    `select merchant_id, status, requested, link_expires_at
+    `select merchant_id, status, requested, link_expires_at, payment_link_id
        from checkout_session where id = $1`,
     [id],
   );
@@ -427,6 +430,7 @@ export async function cancelSession(
   sql: Sql,
   id: string,
   now: Date = new Date(),
+  client?: PaymentLinkClient,
 ): Promise<UpdateResult | null> {
   const row = await load(sql, id);
   if (!row) return null;
@@ -451,6 +455,34 @@ export async function cancelSession(
       message: "An expired session cannot be canceled; it is already terminal",
     };
   }
+  // THE LINK IS CANCELLED BEFORE THE SESSION, AND THE ORDER IS THE POINT.
+  //
+  // Cancelling a session used to mark it `canceled` and leave the Razorpay link
+  // untouched. Verified live: the session read `canceled` while the link read
+  // `created` and https://rzp.io/... still accepted ₹2,570.40 for the rest of
+  // its thirty minutes. Anyone holding that URL could pay an order the agent
+  // had already called off, and the webhook would then report a payment for a
+  // session that says it was cancelled.
+  //
+  // If Razorpay refuses because the link is already paid, the session MUST NOT
+  // become `canceled` — money has moved, and that is a refund, not a
+  // cancellation. Same shape as invariant 2: check first, act second, first
+  // failure short-circuits.
+  if (row.payment_link_id && client) {
+    try {
+      await client.cancel(row.payment_link_id);
+    } catch (error) {
+      return {
+        ok: false,
+        code: "payment_link_not_cancellable",
+        message:
+          "The payment link could not be cancelled, so the session is left as it " +
+          "stands rather than claiming a cancellation that is not true: " +
+          (error instanceof Error ? error.message : String(error)),
+      };
+    }
+  }
+
   // Cancelling an already-cancelled session is a no-op, not an error: the agent
   // may be retrying, and the outcome it wants is already true.
   const { session } = await priceCart(sql, row.merchant_id, row.requested);

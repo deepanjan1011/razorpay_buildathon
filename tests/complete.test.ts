@@ -68,10 +68,12 @@ const product = (o: Partial<Product> = {}): Product => ({
 });
 
 /** Records what it was asked for. Never reachable on a refusal path. */
-function fakeClient(): PaymentLinkClient & { calls: PaymentLinkRequest[] } {
+function fakeClient(): PaymentLinkClient & { calls: PaymentLinkRequest[]; canceled: string[] } {
   const calls: PaymentLinkRequest[] = [];
+  const canceled: string[] = [];
   return {
     calls,
+    canceled,
     async create(request) {
       calls.push(request);
       return {
@@ -79,6 +81,10 @@ function fakeClient(): PaymentLinkClient & { calls: PaymentLinkRequest[] } {
         short_url: `https://rzp.io/rzp/fake${calls.length}`,
         status: "created",
       };
+    },
+    async cancel(id) {
+      canceled.push(id);
+      return { status: "cancelled" };
     },
   };
 }
@@ -368,6 +374,9 @@ describe("completeSession", () => {
     // The live-HTTP failure this test exists for: a client whose construction
     // throws (no keys on the server) turned every 4xx refusal into a 502.
     const exploding: PaymentLinkClient = {
+      async cancel() {
+        return { status: "cancelled" };
+      },
       create() {
         throw new Error("RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required");
       },
@@ -462,5 +471,57 @@ describe("expiry, derived on read", () => {
     assert.equal(outcome.code, "session_expired");
     assert.equal(client.calls.length, 1);
     assert.equal((await getSession(sql, id, after))?.status, "expired");
+  });
+});
+
+describe("cancelling a session must stop the link being payable", () => {
+  // Verified live before this existed: the session read `canceled` while the
+  // Razorpay link read `created`, and https://rzp.io/... still accepted
+  // ₹2,570.40 for the rest of its thirty minutes. Anyone holding the URL could
+  // pay an order the agent had already called off.
+  const start = async () =>
+    (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+
+  test("the live link is cancelled, and cancelled BEFORE the session", async () => {
+    const id = await start();
+    const client = fakeClient();
+    const done = await completeSession(sql, id, payment, client);
+    assert.ok(done?.ok);
+
+    const result = await cancelSession(sql, id, new Date(), client);
+    assert.ok(result?.ok);
+    assert.equal(result.session.status, "canceled");
+    assert.deepEqual(client.canceled, ["plink_fake1"]);
+  });
+
+  test("a link that cannot be cancelled leaves the session alone", async () => {
+    const id = await start();
+    const client = fakeClient();
+    assert.ok((await completeSession(sql, id, payment, client))?.ok);
+
+    // Razorpay refuses to cancel a link that has been paid. Marking the session
+    // `canceled` anyway would claim a cancellation that is not true, for an
+    // order somebody has already paid for. That is a refund, not a cancel.
+    const refusing = {
+      ...client,
+      async cancel(): Promise<{ status: string }> {
+        throw new Error("payment link is already paid");
+      },
+    };
+    const result = await cancelSession(sql, id, new Date(), refusing);
+    assert.equal(result?.ok, false);
+    assert.equal(result?.code, "payment_link_not_cancellable");
+
+    const after = await getSession(sql, id);
+    assert.equal(after?.status, "complete_in_progress");
+  });
+
+  test("a session with no link cancels without calling Razorpay at all", async () => {
+    const id = await start();
+    const client = fakeClient();
+    const result = await cancelSession(sql, id, new Date(), client);
+    assert.ok(result?.ok);
+    assert.equal(result.session.status, "canceled");
+    assert.deepEqual(client.canceled, []);
   });
 });

@@ -14,6 +14,7 @@ import {
   withIdempotency,
 } from "../../../../../lib/checkout/http.ts";
 import { cancelSession } from "../../../../../lib/checkout/session.ts";
+import { razorpayClient } from "../../../../../lib/checkout/razorpay.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ export async function POST(
     );
     if (gate.kind === "replay" || gate.kind === "conflict") return gate.response;
 
-    const result = await cancelSession(sql, sessionId);
+    const result = await cancelSession(sql, sessionId, new Date(), razorpayClient());
     if (result === null) {
       return errorResponse(404, {
         type: "invalid_request",
