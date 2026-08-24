@@ -2888,3 +2888,57 @@ bug and would have left the text field light-on-light.
 The front page shows live counts rather than claims, and falls back to nothing
 if the database is down: a front page that 500s because Postgres is asleep is a
 worse first impression than one with no numbers on it.
+
+---
+
+## 2026-08-24 — The conformance suite found a deviation and then a bug
+
+Built the suite DESIGN.md §1 promised: validate what came back over HTTP against
+the pinned schemas, rather than the objects before serialisation. Those are
+different claims, and this project has been caught by the gap twice already —
+`import.meta.dirname` in a bundle, and an MCP server's working directory.
+
+It went green on the first run, which after three suites that could not fail is
+now a reason for suspicion rather than confidence. **What do I break to make
+this go red?**
+
+### The green run was hiding a real deviation
+
+The 403 it tested was `MANDATE_MISSING`, which carries no alternatives. The
+refusal that DOES carry them — `MANDATE_CEILING_EXCEEDED` — had never been
+checked, and `Error` sets `additionalProperties: false`. **An ACP `Error` with
+an `alternatives` key does not conform.**
+
+This is the first deviation on the RESPONSE side, and it is worse than the
+request-side ones. A request-side extension only affects what we accept; an
+agent validating our RESPONSE against the schema rejects it outright.
+
+Kept, because a refusal an agent cannot act on is a dead end, and the whole
+point of Phase 5 is that the failure path recovers. But now reported by the
+suite as its own line, and declared in the README. A deviation that shows up in
+your own conformance output is a decision; one that does not is a defect waiting
+to be found by someone else.
+
+### And then the added case failed for a different reason
+
+With the ceiling case added, `alternatives` came back **absent** — on a
+catalogue with three obvious candidates.
+
+`alternativesFor` narrowed by ITEM price in SQL and took the most expensive
+matches (`order by price_minor desc limit 12`), then filtered by CART TOTAL
+afterwards. When delivery and tax pushed that entire window over the ceiling,
+every candidate was rejected and the affordable cheap ones had never been
+fetched. A ceiling of 11234 against items at 5700 returned nothing.
+
+**A two-stage filter where the first stage's ordering disagrees with the second
+stage's predicate is not a filter, it is a sampler.** The window can sit entirely
+above the real limit and the query will still look correct.
+
+`totalFor` is monotonic in price, so the true bound can be COMPUTED rather than
+approximated: a binary search over a pure function, about thirty iterations and
+no query, making the SQL bound the actual limit so the ordering and the limit
+finally mean what they say.
+
+This is the direct descendant of the item-price-versus-cart-total bug two
+entries ago — same two quantities, and fixing the comparison left the *fetch*
+still using the wrong one.

@@ -875,3 +875,55 @@ describe("the failure path: drift refused, logged, alternative offered", () => {
     assert.equal(drift[0]?.["live_minor"], 89900);
   });
 });
+
+describe("the alternatives pre-filter window", () => {
+  test("cheap affordable items are not crowded out by expensive ones", async () => {
+    // THE BUG THE CONFORMANCE RUN FOUND. The SQL narrowed by ITEM price and
+    // took the most expensive matches, then the cart-total filter rejected all
+    // of them — so when delivery and tax pushed the whole window over the
+    // ceiling, the affordable cheap items were never fetched and the refusal
+    // offered nothing. A ceiling of 11234 against real items at 5700 returned
+    // an empty list while three perfectly good alternatives existed.
+    //
+    // Enough expensive-but-under-ceiling items to fill the window, and one
+    // cheap one that only survives if the bound is computed rather than
+    // approximated.
+    const filler = Array.from({ length: 14 }, (_, i) =>
+      product({
+        id: `prod_fill_${i}`,
+        variants: [
+          variant({
+            id: `var_fill_${i}`,
+            title: `Filler ${i}`,
+            // Under the ceiling as an item, over it as a cart.
+            price: { amount_minor: 58000 + i, currency: "INR" },
+          }),
+        ],
+      }),
+    );
+    const affordable = product({
+      id: "prod_tiny",
+      variants: [variant({ id: "var_tiny", title: "Tiny", price: { amount_minor: 1000, currency: "INR" } })],
+    });
+
+    await upsertCatalog(sql, MERCHANT, [product(), affordable, ...filler]);
+    const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+
+    const outcome = await completeSession(
+      sql,
+      id,
+      {
+        payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id },
+        mandate: validMandate({ max_amount: { value: 60000, currency: "INR" } }),
+      },
+      fakeClient(),
+    );
+
+    assert.ok(outcome && !outcome.ok);
+    assert.equal(outcome.code, "MANDATE_CEILING_EXCEEDED");
+    assert.ok(
+      outcome.alternatives?.some((a) => a.id === "var_tiny"),
+      "the only affordable item was crowded out of the pre-filter window",
+    );
+  });
+});

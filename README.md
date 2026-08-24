@@ -135,6 +135,13 @@ Honest deviations, not silent ones.
   for a session id.
 - **Mandates travel in a header**, for the same reason: no conformant place in
   the body for a field ACP does not define.
+- **`alternatives` rides on the ACP `Error`.** `Error` sets
+  `additionalProperties: false`, so a refusal carrying recovery data does not
+  conform. This is the only deviation on the RESPONSE side and it is the more
+  serious kind: an agent validating our response against the schema would reject
+  it, where a request-side extension only affects what we accept. Kept because a
+  refusal an agent cannot act on is a dead end, and reported explicitly by
+  `npm run conformance` rather than hidden.
 - **Request signing is ours.** ACP's `Signature` header is `required: false`
   with no algorithm beyond the word "HMAC", no canonicalisation, no signing base
   and no key distribution — two conformant implementations cannot verify each
@@ -154,6 +161,19 @@ Honest deviations, not silent ones.
 ---
 
 ## Setup
+
+### Conformance
+
+```bash
+npm run dev          # terminal 1
+npm run conformance  # terminal 2
+```
+
+Validates what actually came back over HTTP against the pinned ACP schemas —
+not the objects before serialisation, which is a different claim. Covers the
+error shapes too, which in-process validation never sees. Exits non-zero on any
+failure; declared deviations are reported as their own line rather than passing
+silently.
 
 ```bash
 npm install

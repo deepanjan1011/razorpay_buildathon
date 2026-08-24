@@ -73,6 +73,30 @@ export async function alternativesFor(
   const allowed = mandate?.constraints.categories;
   if (allowed !== undefined && allowed.length === 0) return [];
 
+  // THE HIGHEST ITEM PRICE WHOSE CART TOTAL STILL FITS.
+  //
+  // Filtering by item price in SQL and by cart total afterwards looks
+  // equivalent and is not: `order by price_minor desc limit 12` takes the
+  // twelve most EXPENSIVE items under the ceiling, and if delivery and tax push
+  // all twelve over, the affordable cheap ones were never fetched at all. That
+  // is exactly what happened — a ceiling of 11234 against items at 5700
+  // returned nothing, because the pre-filter's window sat entirely above the
+  // real limit.
+  //
+  // `totalFor` is monotonic in price, so the true bound can be found rather
+  // than approximated. Binary search over a pure function: about thirty
+  // iterations, no query, and it makes the SQL bound the ACTUAL limit so the
+  // ordering and the limit finally mean what they say.
+  let lo = 0;
+  let hi = budgetMinor;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (totalFor(mid) <= budgetMinor) lo = mid;
+    else hi = mid - 1;
+  }
+  const maxItemPrice = lo;
+  if (maxItemPrice <= 0) return [];
+
   const { rows } = await sql.query<CatalogVariant>(
     `select merchant_id, variant_id, product_id, title, price_minor, currency,
             availability, category
@@ -92,7 +116,7 @@ export async function alternativesFor(
       limit $5`,
     [
       merchantId,
-      budgetMinor,
+      maxItemPrice,
       excludeIds,
       allowed === undefined ? null : allowed,
       // Over-fetch so the category preference below has something to sort.
@@ -100,8 +124,9 @@ export async function alternativesFor(
     ],
   );
 
-  // AFFORDABLE AS A CART, not as an item. The SQL narrowed by item price, which
-  // is only a cheap pre-filter; this is the comparison that matches the gate.
+  // Belt and braces: the SQL bound is already the real limit, so this should
+  // remove nothing. Kept because it is the comparison that MATCHES THE GATE,
+  // and a bound computed here is a second implementation of the same rule.
   const affordable = rows.filter((r) => totalFor(r.price_minor) <= budgetMinor);
 
   // Cheapest headroom first: the closest thing to what they asked for that

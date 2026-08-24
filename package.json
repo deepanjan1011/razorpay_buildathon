@@ -18,7 +18,8 @@
     "eval": "node scripts/eval.ts",
     "label:init": "node scripts/label-init.ts",
     "agent:issue": "node scripts/issue-agent-credential.ts",
-    "demo": "node scripts/demo.ts"
+    "demo": "node scripts/demo.ts",
+    "conformance": "node scripts/conformance.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
