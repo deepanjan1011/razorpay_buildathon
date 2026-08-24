@@ -96,7 +96,7 @@ export default function UploadPage() {
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 640, margin: "3rem auto", padding: "0 1rem" }}>
       <h1 style={{ fontSize: "1.4rem" }}>Upload a catalogue</h1>
-      <p style={{ color: "#555", fontSize: ".9rem" }}>
+      <p style={{ color: "var(--muted)", fontSize: ".9rem" }}>
         A spreadsheet of products. Messy is fine — merged cells, notes above the
         header, prices written any way at all.
       </p>
@@ -125,7 +125,7 @@ export default function UploadPage() {
       </form>
 
       {error && (
-        <p role="alert" style={{ color: "#b00", fontFamily: "monospace", fontSize: ".85rem" }}>
+        <p role="alert" style={{ color: "var(--bad)", fontFamily: "monospace", fontSize: ".85rem" }}>
           {error}
         </p>
       )}
@@ -144,12 +144,12 @@ export default function UploadPage() {
             {progress.batches_failed > 0 && ` · ${progress.batches_failed} failed`}
           </p>
 
-          <div style={{ background: "#eee", height: 8, borderRadius: 4, overflow: "hidden" }}>
+          <div style={{ background: "var(--line)", height: 8, borderRadius: 4, overflow: "hidden" }}>
             <div
               style={{
                 width: `${pct}%`,
                 height: "100%",
-                background: progress.batches_failed > 0 ? "#c60" : "#282",
+                background: progress.batches_failed > 0 ? "var(--warn)" : "var(--good)",
                 transition: "width .3s",
               }}
             />
@@ -158,7 +158,7 @@ export default function UploadPage() {
           {progress.failures.length > 0 && (
             <div style={{ marginTop: "1rem" }}>
               <h2 style={{ fontSize: "1rem" }}>Batches that failed</h2>
-              <p style={{ fontSize: ".85rem", color: "#555" }}>
+              <p style={{ fontSize: ".85rem", color: "var(--muted)" }}>
                 These rows were not read. They appear in the catalogue as flagged
                 products, never as missing ones. Uploading the same file again
                 retries exactly these batches.
@@ -168,7 +168,7 @@ export default function UploadPage() {
                   <li key={f.batch_index}>
                     batch {f.batch_index} — <strong>{f.reason_code}</strong>
                     <br />
-                    <span style={{ color: "#666" }}>{f.reason_human}</span>
+                    <span style={{ color: "var(--muted)" }}>{f.reason_human}</span>
                   </li>
                 ))}
               </ul>

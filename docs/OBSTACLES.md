@@ -2861,3 +2861,30 @@ the only caller that matters here.
 Verified the way the bug happens rather than the way it is convenient to test —
 launching the server from `/tmp` with a bare environment, which is the condition
 a client creates.
+
+---
+
+## 2026-08-24 — The app had no theme, and the upload page was invisible
+
+`/` returned 404 — a judge opening `localhost:3000` got Next's error page. Worth
+recording because it was reported by the person running it, not by anything in
+the suite: nothing tests that a front door exists.
+
+The upload page was worse and quieter. It had been written against a LIGHT
+background — `#555` labels, `#eee` progress bars, `#b00` errors — while
+`layout.tsx` set no background or colour at all, so every page inherited the
+browser's preference. On a dark browser the field labels rendered near-black on
+black. **The form was operable and unreadable.**
+
+Nothing caught it because every test asserts markup, and markup was correct.
+Contrast is not a property of the DOM; it is a property of the DOM against a
+background nobody had declared. Found by taking a screenshot.
+
+One theme in the shell now, as six tokens, and the upload page's five
+light-theme values recoloured to use them. Form controls needed explicit colour
+too — `input` and `button` do not inherit it, which is the other half of the same
+bug and would have left the text field light-on-light.
+
+The front page shows live counts rather than claims, and falls back to nothing
+if the database is down: a front page that 500s because Postgres is asleep is a
+worse first impression than one with no numbers on it.
