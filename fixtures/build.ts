@@ -280,6 +280,36 @@ const case10: SheetSpec[] = [
   },
 ];
 
+
+/**
+ * Case 11 — EVERY CELL IS TEXT. No typed numbers anywhere.
+ *
+ * The shape is observed, not invented: it is how a real seller's public listing
+ * reads once transcribed, where the price is written `₹ 57/Pack` rather than
+ * entered as 57. A merchant formatting a price column as text is completely
+ * ordinary, and it is also what you get from any transcription route.
+ *
+ * This exists because `detectHeader` used to require a TYPED numeric cell in
+ * the first data row. On a sheet like this there is none, so the header row was
+ * read as data and every column came back `col_N` — which in turn made the
+ * accuracy scorer unable to find the price column at all. Cases 01-10 all carry
+ * typed numeric prices, so not one of them could express this.
+ */
+const case11: SheetSpec[] = [
+  {
+    name: "Products",
+    rows: [
+      ["Sri Kumaran Stores"],
+      ["Madurai, Tamil Nadu"],
+      [],
+      ["Category", "Product", "Price", "Pack Size"],
+      ["Snacks", "Mixture 150gm", "\u20b9 57/Pack", "150 g"],
+      ["Snacks", "Ribbon Pakoda 150 gram", "\u20b9 57/Pack", "150 gram"],
+      ["Sweets", "Mysore Pak", "\u20b9 120/Kg", "250 g"],
+    ],
+  },
+];
+
 const FIXTURES: Array<[string, SheetSpec[]]> = [
   ["messy-01-preamble.xlsx", case01],
   ["messy-02-headers.xlsx", case02],
@@ -291,6 +321,7 @@ const FIXTURES: Array<[string, SheetSpec[]]> = [
   ["messy-08-trailing-junk.xlsx", case08],
   ["messy-09-duplicates.xlsx", case09],
   ["messy-10-stock.xlsx", case10],
+  ["messy-11-all-text.xlsx", case11],
 ];
 
 for (const [file, sheets] of FIXTURES) await write(file, sheets);

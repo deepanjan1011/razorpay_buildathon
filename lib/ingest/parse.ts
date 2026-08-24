@@ -76,7 +76,6 @@ function cellText(value: ExcelJS.CellValue): string {
 type Grid = {
   /** [row][col], both 1-based; index 0 unused. */
   text: string[][];
-  numeric: boolean[][];
   masterRow: number[][];
   width: number;
   height: number;
@@ -86,27 +85,23 @@ function readGrid(ws: ExcelJS.Worksheet): Grid {
   const height = ws.rowCount;
   const width = ws.columnCount;
   const text: string[][] = [[]];
-  const numeric: boolean[][] = [[]];
   const masterRow: number[][] = [[]];
 
   for (let r = 1; r <= height; r++) {
     const t: string[] = [""];
-    const n: boolean[] = [false];
     const m: number[] = [0];
     for (let c = 1; c <= width; c++) {
       const cell = ws.getCell(r, c);
       t.push(cellText(cell.value));
-      n.push(typeof cell.value === "number");
       // exceljs already reflects the master's value on merged slave cells; we
       // only need to record where it came from.
       m.push(cell.isMerged && cell.master ? Number(cell.master.row) : r);
     }
     text.push(t);
-    numeric.push(n);
     masterRow.push(m);
   }
 
-  return { text, numeric, masterRow, width, height };
+  return { text, masterRow, width, height };
 }
 
 const rowCells = (grid: Grid, r: number): string[] =>
@@ -115,8 +110,19 @@ const rowCells = (grid: Grid, r: number): string[] =>
 const nonEmptyCount = (grid: Grid, r: number): number =>
   rowCells(grid, r).filter((v) => v !== "").length;
 
-const hasNumeric = (grid: Grid, r: number): boolean =>
-  (grid.numeric[r] ?? []).slice(1).some(Boolean);
+/**
+ * Digits in the TEXT, not the cell's type.
+ *
+ * This used to be `typeof cell.value === "number"`, which is wrong on its own
+ * terms: a merchant formatting a price column as text is completely ordinary,
+ * and `₹ 57/Pack` is as numeric a price as `57` is. On a sheet where every
+ * cell is text — no numeric cell anywhere — the header test below could never
+ * pass, so the header row was read as data and every column came back as
+ * `col_N`. Found by the first real merchant sheet; every `messy-*` fixture
+ * carries typed numeric prices and so none of them could express it.
+ */
+const hasDigits = (grid: Grid, r: number): boolean =>
+  rowCells(grid, r).some((v) => /\d/.test(v));
 
 function trimTrailingEmpty(values: string[]): string[] {
   let end = values.length;
@@ -125,8 +131,8 @@ function trimTrailingEmpty(values: string[]): string[] {
 }
 
 /**
- * A header row is all text, has at least two filled cells, and is followed by a
- * row containing a number.
+ * A header row carries no digits, has at least two filled cells, and is followed
+ * by a row that does carry digits.
  *
  * That structural test is what lets a Tamil header row be recognised without a
  * dictionary of Tamil field names — the alternative, scoring against known
@@ -139,12 +145,12 @@ function detectHeader(grid: Grid): number | null {
 
   for (let r = 1; r <= limit; r++) {
     if (nonEmptyCount(grid, r) < 2) continue;
-    if (hasNumeric(grid, r)) continue;
+    if (hasDigits(grid, r)) continue;
 
     let next = r + 1;
     while (next <= grid.height && nonEmptyCount(grid, next) === 0) next++;
     if (next > grid.height) continue;
-    if (!hasNumeric(grid, next)) continue;
+    if (!hasDigits(grid, next)) continue;
 
     return r;
   }

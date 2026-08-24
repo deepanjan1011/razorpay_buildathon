@@ -60,6 +60,14 @@ type Label = {
   colour: string[] | null;
   size: string[] | null;
   title_inferred: boolean;
+  /**
+   * Expected price in MINOR UNITS, or "ambiguous" when the sheet genuinely does
+   * not say. `₹ 57/Pack` on a 150g pack and `₹ 57/Kg` on the same 150g pack are
+   * different claims, and the second does not state what one pack costs. The
+   * correct answer there is not a number — it is PRICE_AMBIGUOUS and a review
+   * flag, which the taxonomy already has. Scoring a number would score a guess.
+   */
+  price?: number | "ambiguous";
 };
 
 type Labels = {
@@ -186,12 +194,18 @@ for (const label of labelled) {
       opt(["size"]) ?? "—", label.size.join("|"), raw);
   }
 
-  // Price is deterministic, never the model's. Scored anyway: it is the field
-  // where being wrong costs money, so it belongs in the published table.
-  const priceCell = Object.entries(label.raw).find(([k]) => /price|rate|mrp|amount|விலை/i.test(k));
-  if (priceCell) {
-    score("price_parsed", variant.price.amount_minor > 0, label.source_row,
-      String(variant.price.amount_minor), "a positive integer", raw);
+  // Price is deterministic, never the model's — but it is scored against the
+  // LABEL, not against "did we produce any number at all". `amount_minor > 0`
+  // passes for a confidently wrong price, which on the money path is the worst
+  // grade to award.
+  if (label.price === "ambiguous") {
+    const flagged = variant.normalization.flags.includes("PRICE_AMBIGUOUS");
+    score("price_ambiguous_flagged", flagged, label.source_row,
+      flagged ? "PRICE_AMBIGUOUS" : variant.normalization.flags.join(",") || "no flag",
+      "PRICE_AMBIGUOUS", raw);
+  } else if (typeof label.price === "number") {
+    score("price_parsed", variant.price.amount_minor === label.price, label.source_row,
+      String(variant.price.amount_minor), String(label.price), raw);
   }
 }
 
@@ -199,6 +213,37 @@ const allVariants = products.flatMap((p) => p.variants);
 const flagCounts: Record<string, number> = {};
 for (const v of allVariants) for (const f of v.normalization.flags) flagCounts[f] = (flagCounts[f] ?? 0) + 1;
 const needsReview = allVariants.filter((v) => v.normalization.needs_review).length;
+
+// Guard three: a field that was labelled must actually have been scored.
+//
+// `price_parsed` scored ZERO rows and the table simply omitted it — no error,
+// no warning, a clean-looking number missing the one field where being wrong
+// costs money. The cause was that the scorer locates the price column by its
+// HEADER NAME, and a sheet whose header row went undetected has positional
+// `col_N` keys instead. Both halves were silent.
+//
+// A scorer that cannot find a field must say so and stop. This is the same
+// family as the two refusals above, and the fifth time on this project that
+// the failure signature has been "green, nothing checked".
+const expected: Array<[string, number]> = [
+  ["title", labelled.filter((r) => r.title.length > 0).length],
+  ["category", labelled.filter((r) => r.category.length > 0).length],
+  ["colour", labelled.filter((r) => r.colour !== null).length],
+  ["size", labelled.filter((r) => r.size !== null).length],
+  ["price_parsed", labelled.filter((r) => typeof r.price === "number").length],
+  ["price_ambiguous_flagged", labelled.filter((r) => r.price === "ambiguous").length],
+];
+const unscored = expected.filter(([field, want]) => want > 0 && (scores[field]?.total ?? 0) === 0);
+if (unscored.length > 0) {
+  console.error(
+    "REFUSED: labelled fields that scored zero rows — " +
+      unscored.map(([f, n]) => `${f} (${n} labelled)`).join(", ") +
+      "\n  The scorer could not locate these fields, so the number would be\n" +
+      "  published without them and nothing would say so. Fix the scorer or\n" +
+      "  the labels; do not publish a number with a hole in it.",
+  );
+  process.exit(1);
+}
 
 const overall = Object.values(scores).reduce(
   (a, s) => ({ ok: a.ok + s.ok, total: a.total + s.total }),

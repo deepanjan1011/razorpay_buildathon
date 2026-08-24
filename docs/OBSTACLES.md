@@ -1712,3 +1712,91 @@ npm run smoke:link -> plink_TTQ12h9IwrTd9Q  https://rzp.io/rzp/hQi55cYB  created
 The Payment Link create is no longer an assumption. `complete` end-to-end over
 HTTP, and live webhook delivery from Razorpay's own servers, are still not —
 both are next, and the webhook needs a public URL before it can be tried.
+
+---
+
+## 2026-08-24 — The first real merchant sheet broke header detection, and the scorer hid it
+
+TRANSCRIBING.md Route B: 78 products transcribed from one Chennai seller's
+public IndiaMART listing. IndiaMART serves a stripped page to signed-out and
+automated sessions — three URL patterns returned four unrelated t-shirt
+suppliers for "cotton saree" — so the transcription was done through a
+signed-in browser. That detail matters only because it is *why* every cell in
+the resulting sheet is text.
+
+### `hasNumeric` tested the cell's type, not its content
+
+`detectHeader` required the row after a candidate header to contain a numeric
+cell, and `hasNumeric` was `typeof cell.value === "number"`. This sheet has no
+typed number anywhere: the price reads `₹ 57/Pack`, the pack size `150 g`, the
+shelf life `60 Days`. So no row could ever satisfy the test, the header row
+`Category | Product | Price | Pack Size | Shelf Life` was read as data, and
+every column came back `col_1..col_5`.
+
+**Two things were tangled here and they separate cleanly.**
+
+The first is a real defect, independent of where the sheet came from: a
+merchant formatting a price column as text is completely ordinary, and
+`₹ 57/Pack` is as numeric a price as `57`. Testing the cell's *type* was wrong
+on its own terms. Fixed by testing for digits in the text.
+
+The second is our own contamination, stated rather than hidden: this sheet is
+all-text partly because it was transcribed from a web listing rather than
+opened from a merchant's Excel file. A shopkeeper typing prices into a
+spreadsheet would often produce typed numbers.
+
+The honest sequence was to fix the detector and re-run against the sheet
+**unchanged** — not to edit the data until the code passed. It now finds the
+header at row 4 with the merchant's own names and 78 product rows. *The fixture
+was fine and the detector was broken.*
+
+`messy-11-all-text.xlsx` locks it down, because the real sheet cannot be
+committed. Cases 01–10 all carry typed numeric prices, so not one of them could
+express this — the suite held the cell type constant.
+
+### The scorer omitted a field it could not find, and said nothing
+
+Worse than the missing number. `eval` locates the price column by matching the
+raw key against `/price|rate|mrp|amount|விலை/`. With `col_N` keys nothing
+matched, so `price_parsed` scored **zero rows** — and the published table would
+simply not have had a price line. No error, no warning, a clean-looking
+accuracy figure missing the one field where being wrong costs money.
+
+A scorer that silently drops a field it cannot locate will do it again on the
+next fixture. Fixed as a **refusal**, not a patch: any labelled field that
+scores zero rows aborts the run. That is the third such guard in this script,
+and the fifth time on this project that the failure signature has been *green,
+nothing checked*.
+
+### `PRICE_AMBIGUOUS` is the correct answer, not a number
+
+Seven rows quote a kilo rate beside a sub-kilo pack — `₹ 57/Kg` on a 150g pack,
+`₹ 100/Kg` on 250g of adhirasam. That is either ₹57 for the pack or a kilo rate
+the pack does not state, and **the sheet does not choose**. Scoring a number
+there would be scoring a guess and rewarding a confident wrong answer.
+
+Labels gained a `price` field that accepts `"ambiguous"`, and those rows are
+scored on whether the pipeline raises `PRICE_AMBIGUOUS` — a flag the taxonomy
+already had — rather than on what it computes. The old check was
+`amount_minor > 0`, which passes for a confidently wrong price.
+
+### Labels: twenty rows that could not fail
+
+The first pass accepted several alternatives per row — `["Pepper Kara Sev",
+"Kara Sev"]`, `["Raggi murukku", "Ragi murukku"]`. Both halves are wrong for
+the same reason: a shorter alternative lets the pipeline drop a qualifier for
+free, and accepting a typo *and* its correction means the row cannot fail.
+Twenty unfailable rows inflate the number.
+
+All collapsed to one label, always the seller's own wording. Normalization is
+not spell-correction: silently turning `Raggi` into `Ragi` takes the merchant's
+product name away from them. Shorthand expansion is different and stays
+required — `spl` → `Special` — consistent with the rule already settled in the
+`title_inferred` prompt.
+
+### Known weakness of this fixture
+
+Every row maps to `food`. Category accuracy from this sheet will read near
+perfect and measure nothing, because the taxonomy has no finer bucket for a
+snacks catalogue. It should not be headlined, and it is a direct argument for a
+second sheet from a different trade.

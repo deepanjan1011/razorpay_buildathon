@@ -370,3 +370,24 @@ describe("§4.10 — stock as yes/no/✓/blank/10 pcs", () => {
     }
   });
 });
+
+describe("§4.11 — a sheet where every cell is text, no typed numbers anywhere", () => {
+  test("the header row is still found, so columns keep the merchant's names", async () => {
+    const [sheet] = await parseWorkbook(fixture("messy-11-all-text.xlsx"));
+    assert.ok(sheet);
+
+    // The regression this guards: `detectHeader` required a TYPED numeric cell
+    // in the first data row. There is none here — `₹ 57/Pack` is a string — so
+    // the header was read as data and every column came back `col_N`. That is
+    // not a cosmetic loss: the accuracy scorer locates the price column BY ITS
+    // HEADER NAME, so positional keys made price silently unscoreable.
+    assert.equal(sheet.headerRow, 4);
+    assert.deepEqual(sheet.headers, ["Category", "Product", "Price", "Pack Size"]);
+    assert.equal(sheet.rows.length, 3);
+
+    const first = sheet.rows[0];
+    assert.ok(first);
+    assert.equal(first.cells["Price"], "₹ 57/Pack");
+    assert.equal(first.cells["Product"], "Mixture 150gm");
+  });
+});
