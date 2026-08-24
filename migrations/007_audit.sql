@@ -20,6 +20,14 @@
 
 create table if not exists audit_event (
   event_id    text        primary key,
+
+  -- INSERTION ORDER, because `ts` cannot carry it. Two events written in the
+  -- same millisecond tie on a timestamp, and the tiebreaker was a random uuid —
+  -- so the timeline could render a refusal BEFORE the request that caused it.
+  -- On the one artifact whose whole job is being explainable, that is worse
+  -- than useless. Found by a test asserting the order, not by reading this.
+  seq         bigserial   not null,
+
   ts          timestamptz not null default now(),
 
   session_id  text,
@@ -54,4 +62,4 @@ create table if not exists audit_event (
 );
 
 -- The dashboard renders one session's timeline; that is the only read shape.
-create index if not exists audit_event_session_ts on audit_event (session_id, ts);
+create index if not exists audit_event_session_seq on audit_event (session_id, seq);

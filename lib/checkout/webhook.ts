@@ -12,6 +12,7 @@
  * DESIGN.md §2 "The pending-human state, named" is the specification for
  * `decide`. Read it before changing any outcome here.
  */
+import { record } from "../audit/log.ts";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 import type { Sql } from "../db/sql.ts";
@@ -355,6 +356,32 @@ export async function handleEvent(
 
   const facts = event.session_id ? await sessionFacts(sql, event.session_id) : null;
   const decision = decide(event, facts);
+
+  // THE PSP'S OWN EVENT, IN THE TIMELINE.
+  //
+  // Recorded with the session status AS OBSERVED, which is what makes a late
+  // authorisation legible: "the session was canceled when this arrived", rather
+  // than a reader inferring it from timestamps. The audit log has no constraint
+  // tying events to session state precisely so this row can exist (DESIGN.md
+  // §4) — money moving against a session we refused is the row most worth
+  // having, and a stricter schema would have made it unwritable.
+  await record(sql, {
+    session_id: event.session_id,
+    mandate_id: null,
+    actor: "psp",
+    action: event.event,
+    outcome: decision.outcome,
+    session_status_at_event: facts?.status ?? null,
+    reason_code: decision.reason_code,
+    reason_human: decision.reason_human,
+    evidence: {
+      payment_link_id: event.link_id,
+      payment_id: event.payment_id,
+      razorpay_order_id: event.order_id_raw,
+      amount_paid_minor: event.amount_paid_minor,
+      event_id: event.event_id,
+    },
+  });
 
   if (decision.transition && event.session_id) {
     // Guarded by the status we actually decided against: if another caller moved

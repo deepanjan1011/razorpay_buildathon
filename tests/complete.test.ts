@@ -25,6 +25,9 @@ import {
 } from "../lib/checkout/session.ts";
 import { completeSession, planCompletion } from "../lib/checkout/complete.ts";
 import { handleEvent } from "../lib/checkout/webhook.ts";
+import { signMandate } from "../lib/mandate/sign.ts";
+import { timeline } from "../lib/audit/log.ts";
+import type { Mandate, MandateConstraints } from "../lib/mandate/schema.ts";
 import type { CompletionFacts } from "../lib/checkout/complete.ts";
 import { LINK_TTL_MINUTES, RAZORPAY_MIN_TTL_MINUTES, expiryFor } from "../lib/checkout/razorpay.ts";
 import type { PaymentLinkClient, PaymentLinkRequest } from "../lib/checkout/razorpay.ts";
@@ -93,7 +96,25 @@ function fakeClient(): PaymentLinkClient & { calls: PaymentLinkRequest[]; cancel
 // `handler_id` ALONE. This handler carries no credential, so neither of
 // PaymentData's anyOf branches describes it; sending `credential.token: "n/a"`
 // would fabricate one. Declared as a deviation — see lib/checkout/http.ts.
-const payment = { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id } };
+//
+// EVERY completion below carries a mandate, because invariant 2 means there is
+// no other kind. Before the gate was wired in, these tests all passed without
+// one — which is precisely what the invariant now forbids.
+process.env["MANDATE_SIGNING_SECRET"] ??= "test-secret-not-a-real-key";
+
+const validMandate = (over: Partial<MandateConstraints> = {}): Mandate =>
+  signMandate({
+    mandate_id: `mnd_${Math.random().toString(16).slice(2, 10)}`,
+    issued_at: "2020-01-01T00:00:00Z",
+    expires_at: "2099-01-01T00:00:00Z",
+    constraints: { max_amount: { value: 10_000_000, currency: "INR" }, single_use: false, ...over },
+    intent_text: "test purchase",
+  });
+
+const payment = {
+  payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id },
+  mandate: validMandate(),
+};
 
 beforeEach(async () => {
   sql = await connectEphemeral();
@@ -354,7 +375,11 @@ describe("completeSession", () => {
     const outcome = await completeSession(
       sql,
       id,
-      { payment_data: { handler_id: "dev.acp.tokenized.card" } },
+      // A VALID mandate, so this test asserts the handler refusal and not the
+      // absence of authority. With neither, the gate answers first — correctly:
+      // an agent that may not charge at all does not need to be told which
+      // handler we prefer.
+      { payment_data: { handler_id: "dev.acp.tokenized.card" }, mandate: validMandate() },
       client,
     );
     assert.ok(outcome && !outcome.ok);
@@ -388,7 +413,7 @@ describe("completeSession", () => {
     const wrongHandler = await completeSession(
       sql,
       id,
-      { payment_data: { handler_id: "dev.acp.tokenized.card" } },
+      { payment_data: { handler_id: "dev.acp.tokenized.card" }, mandate: validMandate() },
       exploding,
     );
     assert.ok(wrongHandler && !wrongHandler.ok);
@@ -589,5 +614,128 @@ describe("the window between our deadline and Razorpay's enforcement of it", () 
 
     const after = await getSession(sql, id, PAST_GRACE);
     assert.equal(after?.status, "completed", "a payment inside Razorpay's window must produce an order");
+  });
+});
+
+describe("invariant 2 — no payment call executes without a valid mandate", () => {
+  // The assertion that matters is NOT that the request is refused. It is that
+  // `client.create` was never reached: a refusal that still spent a Razorpay
+  // call would mean the gate ran after the money path, not before it.
+  const start = async () =>
+    (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+
+  const noCall = async (over: Record<string, unknown>, code: string) => {
+    const id = await start();
+    const client = fakeClient();
+    const outcome = await completeSession(
+      sql,
+      id,
+      { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id }, ...over },
+      client,
+    );
+    assert.equal(outcome?.ok, false);
+    assert.equal(outcome && !outcome.ok ? outcome.code : "", code);
+    assert.deepEqual(client.calls, [], "a refused mandate must cost zero Razorpay calls");
+    return id;
+  };
+
+  test("no mandate at all", async () => {
+    await noCall({}, "MANDATE_MISSING");
+  });
+
+  test("a mandate whose signature does not verify", async () => {
+    const forged = { ...validMandate(), signature: "0".repeat(64) };
+    await noCall({ mandate: forged }, "MANDATE_SIGNATURE_INVALID");
+  });
+
+  test("a mandate whose constraints were edited after signing", async () => {
+    // The ceiling is raised without re-signing. This is the attack the
+    // signature exists for, and it must fail on the SIGNATURE — never by
+    // slipping through to a ceiling comparison against the tampered value.
+    const tampered = validMandate({ max_amount: { value: 1, currency: "INR" } });
+    tampered.constraints.max_amount.value = 99_999_999;
+    await noCall({ mandate: tampered }, "MANDATE_SIGNATURE_INVALID");
+  });
+
+  test("an expired mandate", async () => {
+    await noCall(
+      { mandate: signMandate({ ...validMandate(), expires_at: "2020-01-02T00:00:00Z" }) },
+      "MANDATE_EXPIRED",
+    );
+  });
+
+  test("a ceiling below the authoritative total", async () => {
+    // The total includes delivery and tax; a ceiling above the bare item price
+    // but below the real total must still refuse.
+    await noCall(
+      { mandate: validMandate({ max_amount: { value: 89_900, currency: "INR" } }) },
+      "MANDATE_CEILING_EXCEEDED",
+    );
+  });
+
+  test("the refusal is written to the audit log with both strings", async () => {
+    const id = await noCall({}, "MANDATE_MISSING");
+    const rows = await timeline(sql, id);
+    const refusal = rows.find((r) => r.action === "mandate.verify" && r.outcome === "refused");
+    assert.ok(refusal, "the refusal must be in the timeline");
+    assert.equal(refusal.reason_code, "MANDATE_MISSING");
+    assert.ok((refusal.reason_human ?? "").length > 0);
+    assert.equal(refusal.session_status_at_event, "ready_for_payment");
+  });
+
+  test("a live link is NOT reused once its mandate has expired", async () => {
+    // The dangerous case. A link minted under a valid mandate is still payable;
+    // handing it back after the authority lapsed is money moving without
+    // authority, which is the whole point of the gate.
+    const id = await start();
+    const client = fakeClient();
+    const mandate = signMandate({ ...validMandate(), expires_at: "2026-08-23T10:15:00Z" });
+
+    const first = await completeSession(
+      sql, id, { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id }, mandate }, client,
+      new Date("2026-08-23T10:00:00Z"),
+    );
+    assert.equal(first?.ok, true);
+    assert.equal(client.calls.length, 1);
+
+    const later = await completeSession(
+      sql, id, { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id }, mandate }, client,
+      new Date("2026-08-23T10:16:00Z"),
+    );
+    assert.equal(later?.ok, false);
+    assert.equal(later && !later.ok ? later.code : "", "MANDATE_EXPIRED");
+    assert.equal(client.calls.length, 1, "no second link, and the first is not handed out again");
+  });
+});
+
+describe("two clocks — the mandate is the ceiling", () => {
+  test("a link never outlives the mandate that authorised it", async () => {
+    // A link outliving its mandate is a URL a person can still pay after the
+    // authority to charge them lapsed. The reverse is merely inconvenient.
+    const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+    const client = fakeClient();
+    const now = new Date("2026-08-23T10:00:00Z");
+    // Ten minutes of authority against a thirty-minute link.
+    const mandate = signMandate({ ...validMandate(), expires_at: "2026-08-23T10:10:00Z" });
+
+    await completeSession(
+      sql, id, { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id }, mandate }, client, now,
+    );
+
+    assert.equal(client.calls[0]?.expire_by, Math.floor(Date.parse("2026-08-23T10:10:00Z") / 1000));
+    const { rows } = await sql.query<{ link_expires_at: Date }>(
+      "select link_expires_at from checkout_session where id = $1",
+      [id],
+    );
+    assert.equal(rows[0]?.link_expires_at.toISOString(), "2026-08-23T10:10:00.000Z");
+  });
+
+  test("a mandate outliving the link leaves our thirty minutes alone", async () => {
+    const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+    const client = fakeClient();
+    await completeSession(
+      sql, id, payment, client, new Date("2026-08-23T10:00:00Z"),
+    );
+    assert.equal(client.calls[0]?.expire_by, Math.floor(Date.parse("2026-08-23T10:30:00Z") / 1000));
   });
 });

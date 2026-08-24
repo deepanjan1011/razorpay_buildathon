@@ -61,16 +61,17 @@ export async function record(sql: Sql, event: AuditEvent): Promise<string> {
   return eventId;
 }
 
-export type AuditRow = AuditEvent & { event_id: string; ts: Date };
+/** `seq` is insertion order — the only ordering the timeline can trust. */
+export type AuditRow = AuditEvent & { event_id: string; seq: string; ts: Date };
 
 /** One session's timeline, oldest first. The only read shape there is. */
 export async function timeline(sql: Sql, sessionId: string): Promise<AuditRow[]> {
   const { rows } = await sql.query<AuditRow>(
-    `select event_id, ts, session_id, mandate_id, actor, action, outcome,
+    `select event_id, seq, ts, session_id, mandate_id, actor, action, outcome,
             session_status_at_event, reason_code, reason_human, evidence
        from audit_event
       where session_id = $1
-      order by ts asc, event_id asc`,
+      order by seq asc`,
     [sessionId],
   );
   return rows;

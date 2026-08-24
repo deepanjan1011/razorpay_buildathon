@@ -17,6 +17,7 @@ import {
 import { completeSession } from "../../../../../lib/checkout/complete.ts";
 import type { CompleteRequest } from "../../../../../lib/checkout/complete.ts";
 import { razorpayClient } from "../../../../../lib/checkout/razorpay.ts";
+import { parseMandateHeader } from "../../../../../lib/mandate/store.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -58,10 +59,19 @@ export async function POST(
     // request that would have spent money rather than every request.
     let outcome;
     try {
+      // The mandate rides in a header: `additionalProperties: false` on the ACP
+      // request body leaves no conformant place for a field ACP does not
+      // define, and headers are where ACP carries its own `Signature`.
+      // A malformed header parses to null and is refused BY THE GATE with
+      // MANDATE_MISSING, rather than 400ing here — one place decides whether a
+      // charge may happen, and it says why in the audit log.
       outcome = await completeSession(
         sql,
         sessionId,
-        parsed.body as CompleteRequest,
+        {
+          ...(parsed.body as CompleteRequest),
+          mandate: parseMandateHeader(request.headers.get("mandate")),
+        },
         razorpayClient(),
       );
     } catch (error) {

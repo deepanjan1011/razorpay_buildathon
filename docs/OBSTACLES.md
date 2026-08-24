@@ -2343,3 +2343,41 @@ is not being told the item is unavailable, it is being told it needs authority
 it does not have. `unsupported` would suggest the seller cannot sell it, which
 is a different and false claim — the false-reason-code failure this project has
 already made once.
+
+---
+
+## 2026-08-24 — Spec maturity: three gaps a real implementation finds
+
+Recorded together because they are one observation, not three. ACP is a young
+specification and these are the kinds of gap that only show up when something
+actually tries to implement it. Stated neutrally: none of this is a complaint,
+and all three were worked around without pretending to conform.
+
+| # | Where | What | Severity |
+|---|---|---|---|
+| 1 | `Item.quantity` | Prose describes a field the schema does not have; quantity is expressed by repetition | Documentation |
+| 2 | `ExtensionDeclaration.extends` | Names `$.<Schema>.<field>` as the way to add fields, to objects whose schema sets `additionalProperties: false` | Design |
+| 3 | `Signature` header | Declared `required: false` with no algorithm, canonicalisation, signing base, key distribution or replay window | Security |
+
+They escalate, and the escalation is the interesting part.
+
+**One is an editing mistake.** A careful reader resolves it by trusting the
+schema over the prose, and nothing is unbuildable.
+
+**Two is structural.** Both halves are normative schema, so no reading resolves
+it: the mechanism for extending an object is unusable on the object it points
+at. An extension author has nowhere to put the extension. This is what forced
+the no-credential handler to become a declared deviation rather than something
+engineered around.
+
+**Three is a security surface specified in name only.** A header called
+`Signature` with no algorithm and no key distribution cannot be implemented
+interoperably — two conformant implementations cannot verify each other's
+requests, and an implementer who ships *something* there has invented a private
+scheme while appearing to follow the spec. That last part is the risk: the gap
+is invisible from the conformance suite, because a schema cannot check a
+convention it never defined.
+
+**What we did about each**: quantity by repetition (conformant); `handler_id`
+alone with the deviation declared (honest non-conformance); and our own HMAC
+scheme behind a seam, documented as ours (`lib/mandate/sign.ts`).

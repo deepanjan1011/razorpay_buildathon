@@ -20,11 +20,25 @@ import type { RequestedItem } from "./session.ts";
 import { totalOf } from "./totals.ts";
 import type { PaymentLinkClient } from "./razorpay.ts";
 import { expiryFor } from "./razorpay.ts";
+import { verifyMandate } from "../mandate/verify.ts";
+import { verifyMandateSignature } from "../mandate/sign.ts";
+import { consume, isConsumed } from "../mandate/store.ts";
+import type { Mandate } from "../mandate/schema.ts";
+import { record } from "../audit/log.ts";
+import { isTerminal } from "./session.ts";
+import { isCategory } from "../normalize/taxonomy.ts";
+import type { Category } from "../normalize/taxonomy.ts";
 
 /** What `complete` was given, after schema validation. */
 export type CompleteRequest = {
   payment_data?: { handler_id?: string; instrument?: unknown; purchase_order_number?: string };
   buyer?: { first_name?: string; last_name?: string; email?: string; phone_number?: string };
+  /**
+   * Presented in the `Mandate` header, not the body — `additionalProperties:
+   * false` on the ACP request leaves no conformant place for a field ACP does
+   * not define. Parsed by the route, refused by the gate below.
+   */
+  mandate?: Mandate | null;
 };
 
 export type StoredLink = {
@@ -155,6 +169,31 @@ type Row = StoredLink & {
   requested: RequestedItem[];
 };
 
+
+/**
+ * The link deadline, bounded by the mandate. DESIGN.md §3, decided before the
+ * gate was written rather than at the intersection.
+ *
+ * Two independent deadlines over one purchase is a defect waiting for a
+ * boundary. A mandate outliving its link is an authorised purchase nobody can
+ * pay — annoying. A LINK outliving its MANDATE is a URL a person can still pay
+ * after the authority to charge them lapsed — money moving without authority,
+ * which is the whole thing invariant 2 exists to prevent.
+ *
+ * So the mandate is the ceiling and the link is derived from it. One stored
+ * instant still answers every read; this only decides which instant that is.
+ */
+export function expiryForMandate(now: Date, mandate: Mandate | null): { at: Date; unix: number } {
+  const base = expiryFor(now);
+  if (!mandate) return base;
+  const mandateEnd = Date.parse(mandate.expires_at);
+  if (!Number.isFinite(mandateEnd) || mandateEnd >= base.at.getTime()) return base;
+  const at = new Date(mandateEnd);
+  // Razorpay takes SECONDS, and flooring keeps their clock firing no later than
+  // ours — the ordering the expiry grace in session.ts depends on.
+  return { at, unix: Math.floor(at.getTime() / 1000) };
+}
+
 export async function completeSession(
   sql: Sql,
   sessionId: string,
@@ -174,8 +213,93 @@ export async function completeSession(
   // Authoritative state, recomputed. `complete` is the last moment the price an
   // agent is about to put in front of a person can be checked against the
   // catalogue, so it is checked here and not taken from the snapshot.
-  const { session } = await priceCart(sql, row.merchant_id, row.requested);
+  const { session, lines } = await priceCart(sql, row.merchant_id, row.requested);
   const total = totalOf(session.totals);
+
+  // THE GATE RUNS BEFORE THE LINK PLAN, and the reason is a reason code.
+  //
+  // Because the link deadline is derived from the mandate, a mandate that
+  // expires truncates its link to the same instant — so both checks fire at
+  // once and whichever runs first names the cause. Running the link plan first
+  // reported `session_expired`, which is true and useless: it says the link ran
+  // out and hides that the AUTHORITY did. DESIGN.md §3 called this out in
+  // advance as the audit consequence of making the mandate the ceiling.
+  //
+  // Skipped for a session that is already terminal. There the truthful answer
+  // is about the session — it was cancelled, or it was already paid — and
+  // talking about authority for a purchase that is over would be a second
+  // false-reason-code.
+  if (!isTerminal(row.status)) {
+    // ───────────────────────────────────────────────────────────────────────
+    // THE GATE. CLAUDE.md invariant 2: no payment call executes without a valid
+    // mandate. It sits HERE — after the cart is authoritatively priced, before
+    // any branch that can reach `client.create` — because the ceiling must be
+    // compared against the final total including delivery and tax, and because a
+    // refusal must cost zero Razorpay calls.
+    //
+    // It also gates `reuse`. A mandate that expired while a link was live must
+    // not have that link handed out again: the authority to charge lapsed, and
+    // the URL is exactly the thing that can still take money.
+    // From the PRICED LINES, not the ACP projection: `LineItem` has no category
+    // field, and the mapped category is what the gate matches on — never the
+    // merchant's free text, and never a model call at payment time (invariant 1).
+    // A category the DATABASE holds is a plain string, and casting it to the
+    // taxonomy would let an unrecognised value satisfy a constraint by accident.
+    // Anything not in the fixed list reads as `unmapped`, which is a member of no
+    // list of real categories and therefore matches nothing when a constraint is
+    // present — the safe direction, and the same rule the mapper uses.
+    const cartCategories: Category[] = [
+      ...new Set(lines.map((l) => (isCategory(l.variant.category) ? l.variant.category : "unmapped"))),
+    ];
+    const verdict = verifyMandate({
+      mandate: request.mandate ?? null,
+      consumed: request.mandate ? await isConsumed(sql, request.mandate.mandate_id) : false,
+      signatureValid: request.mandate ? verifyMandateSignature(request.mandate) : false,
+      cart: {
+        total_minor: total,
+        currency: session.currency,
+        categories: cartCategories,
+        // Distinct products the buyer asked for, NOT expanded variants —
+        // counting variants refuses a legal two-item cart as four.
+        item_count: lines.length,
+      },
+      now,
+    });
+
+    if (!verdict.ok) {
+      await record(sql, {
+        session_id: sessionId,
+        mandate_id: request.mandate?.mandate_id ?? null,
+        actor: "agent",
+        action: "mandate.verify",
+        outcome: "refused",
+        session_status_at_event: row.status,
+        reason_code: verdict.reason_code,
+        reason_human: verdict.reason_human,
+        evidence: { cart_total_minor: total, currency: session.currency, categories: cartCategories },
+      });
+      const current: CheckoutSession = { id: sessionId, ...session, status: row.status };
+      return {
+        ok: false,
+        status: 403,
+        code: verdict.reason_code,
+        message: verdict.reason_human,
+        session: current,
+      };
+    }
+
+    await record(sql, {
+      session_id: sessionId,
+      mandate_id: request.mandate?.mandate_id ?? null,
+      actor: "agent",
+      action: "mandate.verify",
+      outcome: "allowed",
+      session_status_at_event: row.status,
+      reason_code: null,
+      reason_human: null,
+      evidence: { cart_total_minor: total },
+    });
+  }
 
   const plan = planCompletion(
     {
@@ -201,7 +325,14 @@ export async function completeSession(
     return { ok: false, status: plan.status, code: plan.code, message: plan.message, session: current };
   }
 
-  const expiry = expiryFor(now);
+  // TWO CLOCKS, AND THE MANDATE IS THE CEILING. DESIGN.md §3.
+  //
+  // A link outliving its mandate is a URL a person can still pay after the
+  // authority to charge them lapsed — strictly worse than the reverse, which is
+  // merely an authorised purchase nobody can pay. So the link deadline is the
+  // EARLIER of our thirty minutes and the mandate's own expiry, and there
+  // remains exactly one stored instant a read can answer from.
+  const expiry = expiryForMandate(now, request.mandate ?? null);
 
   let linkId: string;
   let linkUrl: string;
@@ -228,6 +359,32 @@ export async function completeSession(
     linkId = link.id;
     linkUrl = link.short_url;
     expiresAt = expiry.at;
+
+    // The money event. Recorded AFTER the call returns, because an event
+    // written before it would claim a link exists that the call may not have
+    // created — the audit log records what happened, never what was intended.
+    await record(sql, {
+      session_id: sessionId,
+      mandate_id: request.mandate?.mandate_id ?? null,
+      actor: "system",
+      action: "payment.link.created",
+      outcome: "allowed",
+      session_status_at_event: row.status,
+      reason_code: null,
+      reason_human: null,
+      evidence: {
+        payment_link_id: link.id,
+        amount_minor: total,
+        currency: session.currency,
+        expires_at: expiry.at.toISOString(),
+        // Which clock won, so a truncated deadline is legible later rather than
+        // looking like an arbitrary short link.
+        deadline_source:
+          request.mandate && Date.parse(request.mandate.expires_at) < expiryFor(now).at.getTime()
+            ? "mandate"
+            : "link_ttl",
+      },
+    });
 
     await sql.query(
       `update checkout_session
