@@ -162,6 +162,16 @@ Honest deviations, not silent ones.
 
 ## Setup
 
+```bash
+npm install
+cp .env.example .env      # fill in the keys named there
+npm run agent:issue -- agent_demo mer_live "demo"   # prints a token for .env
+npm test
+```
+
+`DATABASE_URL` takes any Postgres. Razorpay keys must start `rzp_test_` — the
+code refuses anything else.
+
 ### Conformance
 
 ```bash
@@ -174,16 +184,6 @@ not the objects before serialisation, which is a different claim. Covers the
 error shapes too, which in-process validation never sees. Exits non-zero on any
 failure; declared deviations are reported as their own line rather than passing
 silently.
-
-```bash
-npm install
-cp .env.example .env      # fill in the keys named there
-npm run agent:issue -- agent_demo mer_live "demo"   # prints a token for .env
-npm test
-```
-
-`DATABASE_URL` takes any Postgres. Razorpay keys must start `rzp_test_` — the
-code refuses anything else.
 
 ## Layout
 
