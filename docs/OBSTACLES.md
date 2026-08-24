@@ -2708,3 +2708,94 @@ fail, after the thirty-two peer combinations that derive their expectation from
 the rule they appear to test. Both were found the same way — by breaking the
 code on purpose — and that is now the only thing that distinguishes coverage
 from decoration.
+
+---
+
+## 2026-08-24 — Driving Phase 5: the alternative finder offered what the gate refuses
+
+The failure path had never run through a real agent. Driving it found the exact
+bug the code was written to prevent, in the first minute.
+
+```
+refused     Cart total 14826 exceeds mandate ceiling 11235
+offered     Millet Ladoo  10000 paise          <- under the ceiling
+took it  -> Cart total 15750 exceeds mandate ceiling 11235
+```
+
+`alternativesFor` compared the **item price** against the ceiling. The gate
+compares the **cart total** — item plus delivery plus tax. A 10000 paise item is
+a 15750 paise cart once ₹50 delivery and 5% tax land, so the finder offered
+something this very gate then refused, sending the agent around the loop the
+whole function exists to avoid.
+
+On a real catalogue the gap is most of the price: these items cost ₹57 and
+delivery is ₹50. Every earlier fixture had enough headroom that item price and
+cart total agreed, which is why nothing caught it.
+
+Fixed by requiring the caller to pass the function the gate's totals come from,
+rather than letting this compute a parallel one. There is deliberately no
+default: a default here would be wrong exactly until someone changed the tax or
+the delivery rule, and then wrong silently.
+
+### The test asserted this property and passed anyway
+
+`an alternative offered would itself pass the gate` was written specifically for
+this, and it passed while the bug was live. The fixture held an item at 40000
+against a 60000 ceiling — 47250 as a cart, comfortably inside — so item price
+and cart total never disagreed and the assertion never had anything to catch.
+
+The fix is a product in the band where they DO disagree: 58000 fits a 60000
+ceiling and 66150 does not. With it, reverting to the bare-price comparison
+fails exactly two tests.
+
+**Third time in three days.** Thirty-two peer combinations that derived their
+expectation from the rule they tested. An alternatives suite whose fixture had
+no over-budget candidate. Now one whose fixture had no over-budget-once-taxed
+candidate. Every one looked like coverage, none could fail, and all three were
+found the same way.
+
+**Breaking the code on purpose is the only thing that separates coverage from
+decoration.** Writing a test alongside a fix produces a test that agrees with
+the fix; the only question that finds out whether it asserts anything is *what
+do I break to make this go red*, asked before trusting it.
+
+### And the demo path never sent the drift
+
+The evidence needs ACP's `Item.unit_amount`, and the MCP tool did not send it —
+so the field built to name drift recorded an empty array on the one path anyone
+will watch. The agent HAS the price; `discover_products` handed it over one call
+earlier. It now carries it forward, and the refusal reads:
+
+```
+drift: [{"id":"var_55c6777cef1151de","quoted_minor":5700,"live_minor":9120}]
+```
+
+Sent only when the agent supplies it: an absent quote is "I did not say", not "I
+said zero", and a zero would read as drift from a price nobody quoted. Fifth
+instance of that shape.
+
+### The whole ninety seconds, driven by a real MCP client
+
+```
+1. discover  Mini Murukku 5700 paise
+   create    total 11235
+   complete  complete_in_progress -> https://rzp.io/rzp/...
+
+2. mandate   ceiling 11235, category food
+   DRIFT     Mini Murukku 5700 -> 9120
+   refused   MANDATE_CEILING_EXCEEDED
+             "Cart total 14826 exceeds mandate ceiling 11235"
+   retryable false
+   offered   Ribbon Murukku 5700, Butter Murukku 5700
+
+3. takes one -> total 11235 -> complete_in_progress -> payable URL
+```
+
+### One more, found by wiring it up as a client would
+
+`.mcp.json` interpolates `${AGENT_TOKEN}`, which only resolves if the variable is
+exported in the shell that launched the MCP client. When it is not, every tool
+call returns 401 and nothing says why — indistinguishable from a revoked
+credential, and it sends whoever is debugging to entirely the wrong place. The
+server now reads `.env` like every other part of this project, and names a
+missing token instead of letting it become an authentication failure.

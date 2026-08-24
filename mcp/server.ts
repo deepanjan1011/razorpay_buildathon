@@ -24,6 +24,18 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+// FALLS BACK TO .env, because an MCP server is launched by a client and
+// inherits whatever environment that client happened to have. `.mcp.json` can
+// interpolate ${AGENT_TOKEN}, but only if the variable is exported in the shell
+// that started the client — and when it is not, every tool call comes back 401
+// with nothing saying why. Every other part of this project reads .env; this
+// had no reason to be the exception.
+try {
+  process.loadEnvFile();
+} catch {
+  /* no .env is fine when the environment already carries the token */
+}
+
 const BASE = process.env["AGENTREADY_BASE_URL"] ?? "http://localhost:3000";
 const TOKEN = process.env["AGENT_TOKEN"] ?? "";
 const API_VERSION = "2026-04-17";
@@ -43,6 +55,20 @@ const idem = () => `mcp-${Date.now()}-${Math.random().toString(16).slice(2, 10)}
 type Json = Record<string, unknown>;
 
 async function call(path: string, init: RequestInit): Promise<{ status: number; body: Json }> {
+  if (!TOKEN) {
+    // Named rather than left as a 401. "invalid_credential" on every call is
+    // indistinguishable from a revoked token, and sends whoever is debugging
+    // to the wrong place entirely.
+    return {
+      status: 0,
+      body: {
+        error: "no_agent_token",
+        message:
+          "AGENT_TOKEN is not set. Mint one with `npm run agent:issue -- <agent> <merchant>` " +
+          "and put it in .env, then restart the MCP client so the server picks it up.",
+      },
+    };
+  }
   const res = await fetch(`${BASE}${path}`, init);
   const text = await res.text();
   let body: Json;
@@ -151,16 +177,30 @@ server.registerTool(
     inputSchema: {
       item_ids: z.array(z.string()).min(1).describe("Repeat an id to buy more than one"),
       currency: z.string().default("INR"),
+      quoted_prices: z
+        .record(z.string(), z.number().int())
+        .optional()
+        .describe(
+          "id -> the price_minor you were shown by discover_products. Optional, and worth " +
+            "sending: it is the only way a later refusal can say 'you read 5700, it is now " +
+            "9120' instead of 'the total changed'.",
+        ),
     },
   },
-  async ({ item_ids, currency }) => {
+  async ({ item_ids, currency, quoted_prices }) => {
     const { status, body } = await call("/api/checkout_sessions", {
       method: "POST",
       headers: headers({ "Idempotency-Key": idem() }),
       body: JSON.stringify({
         currency,
         capabilities: {},
-        line_items: item_ids.map((id) => ({ id })),
+        // `unit_amount` is ACP's own field for exactly this. Sent only when the
+        // agent supplied it — an absent quote is "I did not say", not "I said
+        // zero", and a zero would read as drift from a price nobody quoted.
+        line_items: item_ids.map((id) => {
+          const quoted = quoted_prices?.[id];
+          return quoted === undefined ? { id } : { id, unit_amount: quoted };
+        }),
       }),
     });
     if (status !== 201) return asText({ error: body["code"] ?? "create_failed", status, message: body["message"] });

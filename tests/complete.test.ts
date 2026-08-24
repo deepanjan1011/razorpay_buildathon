@@ -750,6 +750,22 @@ describe("the failure path: drift refused, logged, alternative offered", () => {
     });
 
   /**
+   * UNDER THE CEILING AS AN ITEM, OVER IT AS A CART. 58000 fits a 60000
+   * ceiling; 58000 + 5000 delivery + 5% tax is 66150 and does not. This is the
+   * exact shape that broke on the real catalogue — the finder compared the bare
+   * item price while the gate compared the authoritative total, so it offered
+   * something the gate then refused, which is the loop it exists to avoid.
+   *
+   * Without a product in this band the suite cannot see the bug: every earlier
+   * fixture had enough headroom that item-price and cart-total agreed.
+   */
+  const justOverOnceTaxed = () =>
+    product({
+      id: "prod_edge",
+      variants: [variant({ id: "var_edge", title: "Canvas Shoe - Edge", price: { amount_minor: 58000, currency: "INR" } })],
+    });
+
+  /**
    * OVER THE CEILING AND NOT IN THE CART, which is what makes the assertions
    * below able to fail. Without it the catalogue holds only the refused item
    * and one affordable option, so a ceiling filter that did nothing at all
@@ -764,7 +780,7 @@ describe("the failure path: drift refused, logged, alternative offered", () => {
     });
 
   test("a cart over the ceiling is refused with no PSP call, and offered something it can afford", async () => {
-    await upsertCatalog(sql, MERCHANT, [product(), cheaper(), tooDear()]);
+    await upsertCatalog(sql, MERCHANT, [product(), cheaper(), tooDear(), justOverOnceTaxed()]);
     const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
     const client = fakeClient();
 
@@ -783,6 +799,10 @@ describe("the failure path: drift refused, logged, alternative offered", () => {
     // Gracefully failed: something it could actually buy instead.
     assert.ok(outcome.alternatives && outcome.alternatives.length > 0, "no alternative offered");
     for (const alt of outcome.alternatives) {
+      // The ITEM price fitting is not the test — the CART TOTAL fitting is,
+      // because that is what the gate compares. var_edge fits the first and
+      // fails the second.
+      assert.notEqual(alt.id, "var_edge", "offered an item whose cart total exceeds the ceiling");
       assert.ok(alt.price_minor <= 60000, `${alt.id} is over the ceiling it was offered against`);
       assert.notEqual(alt.id, "var_shoe", "the refused item was offered back");
     }
@@ -793,7 +813,7 @@ describe("the failure path: drift refused, logged, alternative offered", () => {
     // mandate allows; this must not offer what the gate would refuse. An
     // alternative that fails on the next call sends the agent around a loop and
     // spends its budget to arrive back here.
-    await upsertCatalog(sql, MERCHANT, [product(), cheaper(), tooDear()]);
+    await upsertCatalog(sql, MERCHANT, [product(), cheaper(), tooDear(), justOverOnceTaxed()]);
     const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
     const mandate = validMandate({ max_amount: { value: 60000, currency: "INR" } });
 
@@ -817,7 +837,7 @@ describe("the failure path: drift refused, logged, alternative offered", () => {
   test("a refusal an alternative cannot answer gets none", async () => {
     // An expired mandate is not fixed by a cheaper product, and offering one
     // would imply the purchase is still possible.
-    await upsertCatalog(sql, MERCHANT, [product(), cheaper(), tooDear()]);
+    await upsertCatalog(sql, MERCHANT, [product(), cheaper(), tooDear(), justOverOnceTaxed()]);
     const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
     const expired = signMandate({ ...validMandate(), expires_at: "2020-01-02T00:00:00Z" });
 

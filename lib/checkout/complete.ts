@@ -17,7 +17,7 @@ import type { Sql } from "../db/sql.ts";
 import type { CheckoutSession, SessionStatus } from "./session.ts";
 import { RAZORPAY_LINK_HANDLER, priceCart } from "./session.ts";
 import type { RequestedItem } from "./session.ts";
-import { totalOf } from "./totals.ts";
+import { computeTotals, totalOf } from "./totals.ts";
 import type { PaymentLinkClient } from "./razorpay.ts";
 import { expiryFor } from "./razorpay.ts";
 import { verifyMandate } from "../mandate/verify.ts";
@@ -332,7 +332,7 @@ export async function completeSession(
         verdict.reason_code === "MANDATE_CATEGORY_NOT_PERMITTED" ||
         verdict.reason_code === "MANDATE_ITEM_COUNT_EXCEEDED";
 
-      const alternatives = answerable && request.mandate
+      const alternatives = answerable && request.mandate && lines.length > 0
         ? await alternativesFor(sql, row.merchant_id, {
             mandate: request.mandate,
             // The WHOLE ceiling, because these refusals mean the current cart
@@ -340,6 +340,22 @@ export async function completeSession(
             budgetMinor: request.mandate.constraints.max_amount.value,
             nearCategories: cartCategories,
             excludeIds: lines.map((l) => l.variant.variant_id),
+            // THE SAME FUNCTION THE GATE'S TOTALS COME FROM. Comparing the
+            // ceiling against a bare item price offered things this very gate
+            // then refused — on a real catalogue a 10000 paise item is a 15750
+            // paise cart once delivery and tax land. Reusing computeTotals is
+            // what stops the two drifting apart again; a parallel arithmetic
+            // here would be correct exactly until one of them changed.
+            totalFor: (itemPriceMinor) =>
+              totalOf(
+                computeTotals([
+                  {
+                    variant: { ...lines[0]!.variant, price_minor: itemPriceMinor },
+                    quantity: 1,
+                    amount: itemPriceMinor,
+                  },
+                ]),
+              ),
           })
         : [];
 

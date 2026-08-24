@@ -45,11 +45,26 @@ export async function alternativesFor(
     budgetMinor: number;
     /** Prefer these categories; falls back to any allowed one. */
     nearCategories: string[];
+    /**
+     * The CART TOTAL a given item price produces — delivery and tax included.
+     *
+     * REQUIRED, and required because the first version did not have it. The
+     * gate compares the ceiling against the authoritative TOTAL, and this
+     * compared it against the bare item price, so an item under the ceiling was
+     * offered and then refused on the next call for the total it implied. On
+     * the real catalogue that gap is most of the price: a 10000 paise item is a
+     * 15750 paise cart once ₹50 delivery and 5% tax are added.
+     *
+     * Passing the same function the gate's totals come from is what stops the
+     * two drifting apart again. A default here would be a trap, so there is
+     * none.
+     */
+    totalFor: (itemPriceMinor: number) => number;
     excludeIds: string[];
     limit?: number;
   },
 ): Promise<Alternative[]> {
-  const { mandate, budgetMinor, nearCategories, excludeIds, limit = 3 } = options;
+  const { mandate, budgetMinor, nearCategories, excludeIds, totalFor, limit = 3 } = options;
   if (budgetMinor <= 0) return [];
 
   // The mandate's category constraint, applied exactly as the gate applies it:
@@ -85,13 +100,17 @@ export async function alternativesFor(
     ],
   );
 
+  // AFFORDABLE AS A CART, not as an item. The SQL narrowed by item price, which
+  // is only a cheap pre-filter; this is the comparison that matches the gate.
+  const affordable = rows.filter((r) => totalFor(r.price_minor) <= budgetMinor);
+
   // Cheapest headroom first: the closest thing to what they asked for that
   // still fits. `order by price_minor desc` already did that; this only lifts
   // the same-category ones above the merely-allowed ones.
   const near = new Set(nearCategories);
   const sorted = [
-    ...rows.filter((r) => near.has(r.category)),
-    ...rows.filter((r) => !near.has(r.category)),
+    ...affordable.filter((r) => near.has(r.category)),
+    ...affordable.filter((r) => !near.has(r.category)),
   ];
 
   return sorted.slice(0, limit).map((r) => ({
