@@ -145,6 +145,7 @@ const event = (over: Partial<LinkEvent> = {}): LinkEvent => ({
   session_id: "cs_1",
   link_id: "plink_1",
   order_id: "abc",
+  order_id_raw: "order_abc",
   payment_id: "pay_1",
   amount_minor: 136500,
   amount_paid_minor: 136500,
@@ -359,5 +360,57 @@ describe("handleEvent — end to end against the real paid payload", () => {
       [SESSION],
     );
     assert.equal(rows[0]?.status, "complete_in_progress");
+  });
+
+  // razorpay_order_id was added by migration 006 because a Payment Link creates
+  // its own order and only names it on the webhook. parseEvent extracted it,
+  // LinkEvent carried it, and NO STATEMENT IN THE CODEBASE EVER WROTE IT — a
+  // column that existed as an empty promise. Found only after a real captured
+  // payment left it null. It is the reconciliation key to Razorpay's ledger.
+  test("a captured payment stores it, prefix and all", async () => {
+    await seed("complete_in_progress", 73500);
+    const id = SESSION;
+    await handleEvent(
+      sql,
+      event({
+        session_id: id,
+        event: "payment_link.paid",
+        order_id: "TTTgqhxfWVphIh",
+        order_id_raw: "order_TTTgqhxfWVphIh",
+        amount_paid_minor: 73500,
+        amount_minor: 73500,
+      }),
+      new Date(),
+    );
+
+    const { rows } = await sql.query<{ razorpay_order_id: string | null }>(
+      "select razorpay_order_id from checkout_session where id = $1",
+      [id],
+    );
+    // The PREFIXED form. `canonicalId` strips the prefix so two spellings of
+    // one id can be compared; storing that stripped value in a column named
+    // razorpay_order_id is a trap, because Razorpay's own API 404s on it.
+    assert.equal(rows[0]?.razorpay_order_id, "order_TTTgqhxfWVphIh");
+  });
+
+  test("a redelivery carrying no order id does not blank the one we hold", async () => {
+    await seed("complete_in_progress", 73500);
+    const id = SESSION;
+    await handleEvent(
+      sql,
+      event({ session_id: id, event: "payment_link.paid", order_id_raw: "order_keepme", amount_paid_minor: 73500, amount_minor: 73500 }),
+      new Date(),
+    );
+    await handleEvent(
+      sql,
+      event({ session_id: id, event_id: "evt_2", event: "payment_link.paid", order_id_raw: null, amount_paid_minor: 73500, amount_minor: 73500 }),
+      new Date(),
+    );
+
+    const { rows } = await sql.query<{ razorpay_order_id: string | null }>(
+      "select razorpay_order_id from checkout_session where id = $1",
+      [id],
+    );
+    assert.equal(rows[0]?.razorpay_order_id, "order_keepme");
   });
 });

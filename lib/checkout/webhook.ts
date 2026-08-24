@@ -63,7 +63,18 @@ export type LinkEvent = {
   /** Our checkout session id: `complete` puts it in the link's `reference_id`. */
   session_id: string | null;
   link_id: string | null;
+  /** Canonicalised — prefix removed — for COMPARING ids across a payload. */
   order_id: string | null;
+  /**
+   * The order id EXACTLY as Razorpay wrote it, prefix and all, for storing.
+   *
+   * `canonicalId` exists to compare `order_QflczVVaNJciLq` against
+   * `QflczVVaNJciLq` when the same payload carries both. It is the wrong thing
+   * to persist: a column called `razorpay_order_id` holding `QflczVVaNJciLq`
+   * is a trap, because Razorpay's own API 404s on it. Store what they call it;
+   * canonicalise only when matching.
+   */
+  order_id_raw: string | null;
   payment_id: string | null;
   amount_minor: number | null;
   amount_paid_minor: number | null;
@@ -124,6 +135,7 @@ export function parseEvent(raw: unknown, eventId: string): LinkEvent | null {
     session_id: str(link["reference_id"]),
     link_id: str(link["id"]),
     order_id: canonicalId(link["order_id"]),
+    order_id_raw: str(link["order_id"]),
     payment_id: str(payment["id"]),
     amount_minor: minor(link["amount"]),
     amount_paid_minor: minor(link["amount_paid"]),
@@ -349,11 +361,24 @@ export async function handleEvent(
     // the session between the read and here, this updates nothing rather than
     // overwriting a decision made on fresher facts.
     await sql.query(
+      // THE ORDER ID IS PERSISTED HERE, AND USED TO NOT BE ANYWHERE.
+      //
+      // `razorpay_order_id` was added by migration 006 specifically because a
+      // Payment Link creates its own order and only names it on the webhook.
+      // `parseEvent` extracted it, `LinkEvent` carried it — and no statement in
+      // the codebase ever wrote it. The column existed as an empty promise, and
+      // after a real captured payment it was still null.
+      //
+      // That is the reconciliation key to Razorpay's own ledger: without it a
+      // completed session holds a link id and a payment id but nothing that
+      // joins to their order. `coalesce` because a redelivery of an earlier
+      // event must not blank an id we already hold.
       `update checkout_session
           set status = $2, updated_at = $3,
+              razorpay_order_id = coalesce($5, razorpay_order_id),
               snapshot = jsonb_set(snapshot, '{status}', to_jsonb($2::text))
         where id = $1 and status = $4`,
-      [event.session_id, decision.transition, now, facts?.status ?? null],
+      [event.session_id, decision.transition, now, facts?.status ?? null, event.order_id_raw],
     );
   }
 

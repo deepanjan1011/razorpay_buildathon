@@ -2109,3 +2109,70 @@ fifteen-minute wait nobody has spent yet.
 
 No traffic from Razorpay has reached the webhook endpoint. Live delivery needs a
 public URL and `RAZORPAY_WEBHOOK_SECRET`, and remains the one untested leg.
+
+---
+
+## 2026-08-24 — Live webhook delivery, and a column that was an empty promise
+
+Phase 2's last untested leg. zrok tunnel, a webhook registered in the Razorpay
+dashboard against a secret we generated, and real signed events delivered to a
+laptop for the first time.
+
+### Delivery proven without anyone touching a card
+
+`payment_link.cancelled` is subscribed and cancelling a session now cancels its
+link, so the whole delivery path could be exercised with no payment at all:
+
+```
+razorpay_webhook | TTTbuohQLPGm80 | 200
+{"outcome":"observed","transition":null,"reason_code":"ALREADY_TERMINAL",
+ "reason_human":"Session was already canceled","session_status_at_event":"canceled"}
+```
+
+The key is Razorpay's own `x-razorpay-event-id`, the signature verified against
+our secret, and `ALREADY_TERMINAL` is right: the session was cancelled before
+its link, so by the time the event arrived there was nothing to transition.
+
+### The gate: a real payment completed a session
+
+```
+razorpay_webhook | TTTkuZkPX2lHxh | 200
+{"outcome":"allowed","transition":"completed","reason_code":"PAYMENT_CAPTURED",
+ "reason_human":"Payment pay_TTTjKGWVAoaalD captured for 73500",
+ "session_status_at_event":"complete_in_progress"}
+```
+
+Test-mode card payments need the **"Pay on bank's page"** link — the OTP box
+waits for an SMS that test mode never sends, and the bank page is a simulator
+with Success and Failure buttons. Worth writing down; it wasted several minutes.
+
+### `razorpay_order_id` was declared, parsed, carried, and never written
+
+The session completed with `razorpay_order_id` still **null**. Migration 006
+added that column specifically because a Payment Link creates its own order and
+only names it on the webhook. `parseEvent` extracted it. `LinkEvent` carried it.
+**No statement anywhere in the codebase ever wrote it.**
+
+Grep found the column in exactly two places: the migration that creates it, and
+a comment explaining why it is nullable. Zero writes.
+
+It is the reconciliation key to Razorpay's ledger — without it a completed
+session holds a link id and a payment id and nothing that joins to their order.
+Confirmed against their API that the field is really there:
+`order_id: "order_TTTgqhxfWVphIh"`.
+
+This is the same family as the cancel defect and has the same signature: the
+value existed, the code that should consume it did not, and **no test of the
+parser can notice that its output goes nowhere.** A parser test asserts what
+comes out of the parser. It cannot assert that anything downstream reads it.
+
+### And a trap inside the fix
+
+`canonicalId` strips the id's prefix so `order_QflczVVaNJciLq` can be compared
+against `QflczVVaNJciLq` when one payload carries both spellings. That is the
+right value to COMPARE and the wrong value to STORE: a column named
+`razorpay_order_id` holding `TTTgqhxfWVphIh` is a trap, because Razorpay's own
+API 404s on it. `LinkEvent` now carries both — `order_id` canonical for
+matching, `order_id_raw` verbatim for persisting — and the write uses the raw
+one. `coalesce`, so a redelivery carrying no order id cannot blank an id we
+already hold.
