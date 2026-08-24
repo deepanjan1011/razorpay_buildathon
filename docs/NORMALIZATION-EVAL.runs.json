@@ -1,0 +1,34 @@
+[
+  {
+    "run_date": "2026-08-24T02:01:02.530Z",
+    "model_served": "gemini-3.5-flash",
+    "prompt_sha256": "c90119cfffc96f0538877893442ce3aff6521eac393364103471a1690c379d0e",
+    "ok": 447,
+    "total": 470,
+    "note": "baseline — first run against a real merchant sheet"
+  },
+  {
+    "run_date": "2026-08-24T02:31:00.000Z",
+    "model_served": "gemini-3.5-flash",
+    "prompt_sha256": "2a528b50a1bcb1c178e524c31ab9eb3c637185ca9e93b17bb41329567e51fbc1",
+    "ok": 463,
+    "total": 470,
+    "note": "title rule rewritten: reproduce the merchant wording, expand shorthand only"
+  },
+  {
+    "run_date": "2026-08-24T02:13:09.954Z",
+    "model_served": "gemini-3.5-flash",
+    "prompt_sha256": "2a528b50a1bcb1c178e524c31ab9eb3c637185ca9e93b17bb41329567e51fbc1",
+    "ok": 463,
+    "total": 470,
+    "note": "variant identity moved off the model's title onto the merchant's own cells"
+  },
+  {
+    "run_date": "2026-08-24T02:14:49.354Z",
+    "model_served": "gemini-3.5-flash",
+    "prompt_sha256": "2a528b50a1bcb1c178e524c31ab9eb3c637185ca9e93b17bb41329567e51fbc1",
+    "ok": 463,
+    "total": 470,
+    "note": "same run; adds automatic detection of fields that cannot discriminate"
+  }
+]

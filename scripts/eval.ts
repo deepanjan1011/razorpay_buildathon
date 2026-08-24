@@ -35,7 +35,9 @@ try {
   /* provider key check reports it */
 }
 
-const path = process.argv[2];
+const noteFlag = process.argv.indexOf("--note");
+const note = noteFlag > 0 ? (process.argv[noteFlag + 1] ?? "") : "";
+const path = process.argv.filter((a, i) => i >= 2 && a !== "--note" && i !== noteFlag + 1)[0];
 if (!path) {
   console.error("usage: npm run eval -- fixtures/real-<name>.xlsx");
   process.exit(1);
@@ -251,6 +253,59 @@ const overall = Object.values(scores).reduce(
 );
 const pct = (o: number, t: number) => (t === 0 ? "—" : `${Math.round((o / t) * 100)}%`);
 
+
+
+// A field where every label carries the SAME value cannot discriminate: it will
+// read 100% whatever the pipeline does. Detected rather than remembered, so the
+// next fixture reports its own blind spots instead of inheriting this note.
+const singleValued = (["category", "colour", "size"] as const)
+  .map((field) => {
+    const values = new Set(
+      labelled.flatMap((r) => (field === "category" ? r.category : (r[field] ?? []))),
+    );
+    return [field, values] as const;
+  })
+  .filter(([, values]) => values.size === 1)
+  .map(([field, values]) => `\`${field}\` (every labelled row is \`${[...values][0]}\`)`);
+
+// ── run history ───────────────────────────────────────────────────────────
+// Both numbers get published, not just the latest. A single figure cannot show
+// that the eval FOUND something; two, with the change between them, can. The
+// history is a data file this script appends to, so the document stays fully
+// generated and the "never hand-edited" rule still holds.
+type Run = {
+  run_date: string;
+  model_served: string;
+  prompt_sha256: string;
+  ok: number;
+  total: number;
+  note: string;
+};
+const runsPath = join(import.meta.dirname, "..", "docs", "NORMALIZATION-EVAL.runs.json");
+let runs: Run[] = [];
+try {
+  runs = JSON.parse(await readFile(runsPath, "utf8")) as Run[];
+} catch {
+  /* first run */
+}
+runs.push({
+  run_date: new Date().toISOString(),
+  model_served: result.fingerprint?.model_served ?? "-",
+  prompt_sha256: result.fingerprint?.prompt_sha256 ?? "-",
+  ok: overall.ok,
+  total: overall.total,
+  note,
+});
+await writeFile(runsPath, `${JSON.stringify(runs, null, 2)}\n`, "utf8");
+
+const historyTable = runs
+  .map(
+    (r) =>
+      `| ${r.run_date.slice(0, 10)} | \`${r.model_served}\` | \`${r.prompt_sha256.slice(0, 12)}\` | ` +
+      `${r.ok}/${r.total} (${pct(r.ok, r.total)}) | ${r.note || "-"} |`,
+  )
+  .join("\n");
+
 // ── write the document ────────────────────────────────────────────────────
 const fp = result.fingerprint;
 const doc = `# NORMALIZATION-EVAL
@@ -265,6 +320,15 @@ across **${labelled.length} hand-labelled products** from a real merchant sheet.
 
 At n=${overall.total} observations, treat this as an estimate. It is one
 catalogue from one source, not a population.
+
+${
+  singleValued.length === 0
+    ? ""
+    : `**Measures nothing on this fixture:** ${singleValued.join(", ")}. A field with one
+distinct label reads 100% regardless of what the pipeline does, and must not be
+quoted as accuracy. Fixing this needs a second sheet from a different trade, not
+more rows from this one.`
+}
 
 | Field | Correct | Accuracy |
 |---|---|---|
@@ -292,9 +356,19 @@ ${misses.length === 0
       )
       .join("\n")}
 
+## Run history
+
+Every run this fixture has produced, oldest first. A number that moved says more
+than a number standing alone: it shows what the eval actually caught.
+
+| Date | Model | Prompt | Score | What changed |
+|---|---|---|---|---|
+${historyTable}
+
 ## Run fingerprint
 
-An accuracy number belongs to the run that produced it.
+An accuracy number belongs to the run that produced it. The row above summarises
+this run; here it is in full.
 
 | Field | Value |
 |---|---|

@@ -61,7 +61,10 @@ You are given rows that have already been parsed. Prices, stock levels and curre
 For each row, return:
 
 - source_row: echo back the source_row you were given, unchanged.
-- title: the product name a buyer would recognise. Expand merchant shorthand: "Blk RunShoe M-9" is a black running shoe in men's size 9, so the title is "Running Shoe". Do NOT put the size or colour in the title; they belong in options.
+- title: the product name AS THE MERCHANT WROTE IT. Reproduce their wording. The ONE change you may make is expanding shorthand: "Blk RunShoe M-9" is a black running shoe in men's size 9, so the title is "Running Shoe". Everything else stays theirs.
+  - Do NOT correct spelling. "Raggi murukku" stays "Raggi murukku"; "Bitter Guard Chips" stays "Bitter Guard Chips"; "Moong dhall" stays "Moong dhall". The catalogue is the merchant's, and silently respelling it takes their own product name away from them.
+  - Do NOT drop a word that distinguishes one product from another. "Black Sesame Chikki" and "White Sesame Chikki" are DIFFERENT PRODUCTS, and "Sesame Chikki" names neither of them. Dropping "Yellow" from "Yellow Banana Chips" where the sheet also lists "Banana Chips Sweet" merges two things a buyer would not confuse.
+  - Do NOT put the size or colour in the title; they belong in options. But a colour word that names an INGREDIENT or VARIETY is part of the name: black sesame is a kind of seed, not a colour of chikki. Treat a colour as an option only where the same product appears in the sheet in more than one colour.
 - title_inferred: true ONLY if the row gave you nothing to name the product from and you invented one. Expanding merchant shorthand is NOT inferring — "Blk RunShoe M-9" already names the product, so title_inferred is false there. Translating is not inferring either. Set it true when the row genuinely had no name.
 - category: exactly one of the fixed list. You cannot invent members. If nothing fits with confidence, return "unmapped" — do not force-fit.
 - category_confidence: 0-1. Be honest. A low number sends the row to a human, which is the correct outcome when you are unsure.
@@ -72,7 +75,9 @@ For each row, return:
 - variant_group: a stable lowercase slug shared by rows that are variants of ONE product. "Canvas Shoe White" and "Canvas Shoe Black" share "canvas-shoe". A row that stands alone gets null.
 - confidence: 0-1 for the row overall.
 
-Some sheets are in Tamil, or in Tamil transliterated into Latin script ("Paruthi Sattai" is a cotton shirt). Read them. Return the title in English where you are confident of the meaning, and preserve the original wording in description when it carries information you cannot translate confidently.
+Some sheets are in Tamil, or in Tamil transliterated into Latin script ("Paruthi Sattai" is a cotton shirt). Read them, and translate a title written in Tamil SCRIPT into English where you are confident of the meaning. Preserve the original wording in description when it carries information you cannot translate confidently.
+
+A title already written in Latin script is NOT translated and NOT re-spelled: "Oma podi" stays "Oma podi", not "Omapodi"; "Pottukadalai laddu" stays as written. The merchant chose that spelling. Re-spelling a transliteration is the same mistake as correcting one.
 
 Rules:
 - Never invent a product that is not in the row.

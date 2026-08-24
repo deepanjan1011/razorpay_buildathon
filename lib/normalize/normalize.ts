@@ -150,6 +150,34 @@ function variantsForRow(
 
   const provenance = provenanceFor(row, sheet, ctx);
 
+  // IDENTITY COMES FROM THE MERCHANT'S OWN CELLS, NOT THE MODEL'S TITLE.
+  //
+  // This used to be `extraction.variant_group ?? extraction.title`. On the
+  // first real sheet the model titled three different products "Sesame Chikki"
+  // — black sesame, white sesame and white til — and all three collapsed to
+  // ONE variant id. `Variant.id` is the ACP `items[].id`, so an agent
+  // referencing it had referenced three products, and a Phase 3 mandate issued
+  // against it would authorise a purchase nobody can identify. A prompt fix
+  // makes those titles distinct again, but leaves identity resting on the
+  // model wording a title the same way twice.
+  //
+  // The price and stock columns are excluded deliberately: repricing an item
+  // must not mint a new id, and an id that changes on every stock edit breaks
+  // the saved reference this hash exists to protect. What remains is the
+  // merchant's own identifying text — distinct for distinct products, and
+  // identical for genuinely duplicate rows, which is what dedup wants.
+  // Case-folded and whitespace-collapsed, because the duplicates a merchant
+  // actually produces differ that way: messy-09 lists "Canvas Shoe White" on
+  // one sheet and "canvas shoe white" on another, and they are one product.
+  // Hashing the bytes verbatim made cross-sheet dedup fail — caught by the
+  // regression test, not by reading this.
+  const identityFields = Object.entries(row.cells)
+    .filter(([k]) => k !== priceField && k !== listField && k !== stockField)
+    .map(([k, v]) => `${k.toLowerCase().trim()}=${v.toLowerCase().trim().replace(/\s+/g, " ")}`)
+    .sort()
+    .join(";");
+  const identity = extraction.variant_group ?? (identityFields || extraction.title);
+
   return optionSets.map((options) => {
     const flags = [...baseFlags];
     // A variant with no price cannot be sold. Belt and braces: parsePrice
@@ -171,12 +199,7 @@ function variantsForRow(
         : `${extraction.title} - ${Object.values(options).join(" / ")}`;
 
     return {
-      id: stableId(
-        "var",
-        ctx.merchantId,
-        extraction.variant_group ?? extraction.title,
-        optionSignature,
-      ),
+      id: stableId("var", ctx.merchantId, identity, optionSignature),
       title,
       category,
       category_raw: extraction.category === category ? null : extraction.category,

@@ -538,3 +538,57 @@ describe("a price list with no stock column", () => {
     assert.ok(!variants.some((v) => v.normalization.flags.includes("STOCK_NOT_TRACKED")));
   });
 });
+
+describe("variant identity does not rest on the model wording a title well", () => {
+  // The first real merchant sheet had three products the model all titled
+  // "Sesame Chikki" — black sesame, white sesame, white til. Identity was
+  // hashed from that title, so all three shared ONE variant id. Variant.id is
+  // the ACP items[].id: an agent referencing it had referenced three products,
+  // and a Phase 3 mandate against it authorises a purchase nobody can identify.
+  //
+  // The prompt was fixed too, but a prompt is not a guarantee. This asserts the
+  // property that must hold even when the model gets the title wrong.
+  test("different merchant rows keep different ids under one collapsed title", async () => {
+    const [sheet] = await parseWorkbook(fixture("messy-11-all-text.xlsx"));
+    assert.ok(sheet);
+    const rows = sheet.rows.map((r) => r.row);
+    assert.equal(rows.length, 3);
+
+    const collapsed = rows.map((row) => extraction({ source_row: row, title: "Snack" }));
+    const variants = normalizeSheet(sheet, collapsed, {
+      merchantId: "mer_t",
+      sourceFile: "t.xlsx",
+    }).flatMap((p) => p.variants);
+
+    assert.equal(variants.length, 3);
+    assert.equal(new Set(variants.map((v) => v.id)).size, 3);
+  });
+
+  test("but the same item on two sheets still shares one id", async () => {
+    // messy-09's duplicates are CROSS-SHEET and differ in case: "Canvas Shoe
+    // White" on Main Stock, "canvas shoe white" on Godown, at prices 899 and
+    // 899 but Kolhapuri at 650 and 675. One product, however the merchant
+    // typed it and whatever it is repriced to.
+    const sheets = await parseWorkbook(fixture("messy-09-duplicates.xlsx"));
+    const idsFor = (item: string) =>
+      sheets.flatMap((sheet) =>
+        normalizeSheet(
+          sheet,
+          sheet.rows.map((r) => extraction({ source_row: r.row, title: "Anything" })),
+          { merchantId: "mer_t", sourceFile: "t.xlsx" },
+        )
+          .flatMap((p) => p.variants)
+          .filter((v) => (v.provenance.source_cells["Item"] ?? "").toLowerCase() === item)
+          .map((v) => v.id),
+      );
+
+    const canvas = idsFor("canvas shoe white");
+    assert.equal(canvas.length, 3, "three rows name this shoe");
+    assert.equal(new Set(canvas).size, 1, "case and sheet must not split identity");
+
+    // Repricing is not a new product: 650 and 675 are the same chappal.
+    const chappal = idsFor("kolhapuri chappal");
+    assert.equal(chappal.length, 2);
+    assert.equal(new Set(chappal).size, 1, "a reprice must not mint a new id");
+  });
+});

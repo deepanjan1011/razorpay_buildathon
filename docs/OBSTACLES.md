@@ -1800,3 +1800,90 @@ Every row maps to `food`. Category accuracy from this sheet will read near
 perfect and measure nothing, because the taxonomy has no finer bucket for a
 snacks catalogue. It should not be headlined, and it is a direct argument for a
 second sheet from a different trade.
+
+---
+
+## 2026-08-24 — Three products, one checkout id: the eval found a buy-path defect
+
+The 95% run's title failures split into two families that turned out to be one
+bug, and the second family was not a naming problem.
+
+### Sixteen title misses, one cause
+
+Six were the model respelling the merchant — `Ragi` for `Raggi`, `Moong Dal`
+for `Moong dhall`, `Jackfruit` for `Jack Fruit`, `Omapodi` for `Oma podi`. Ten
+were it dropping a distinguishing word — `Sesame Chikki` for all three of
+`Black Sesame Chikki`, `White Sesame Chikki` and `White Til Chikki`; `Banana
+Chips` for all three banana rows; `Potato Chips` for two different chips.
+
+Both are the model deciding it knows better than the merchant, and both came
+from one prompt line: *"the product name a buyer would recognise"*, plus a
+Tamil instruction to *"return the title in English"* that licensed re-spelling
+Latin-script transliterations. Rewritten as a single rule — reproduce the
+merchant's wording, expand shorthand only, never drop a distinguishing word.
+**All sixteen fixed: `title` 62/78 → 78/78.**
+
+### The collapse reached `stableId`, which is the real defect
+
+Identity was `stableId("var", merchantId, variant_group ?? extraction.title,
+optionSignature)` — hashed from **the model's title**. Three rows titled
+`Sesame Chikki` therefore produced ONE variant id:
+
+```
+row 49  var_60612ea51469678b | Black Sesame Chikki
+row 50  var_60612ea51469678b | White Sesame Chikki
+row 51  var_60612ea51469678b | White Til Chikki
+```
+
+`Variant.id` is the ACP `items[].id`. An agent that referenced that id
+referenced three products, and a Phase 3 mandate issued against it would
+authorise a purchase nobody can identify. **That is worse than mislabelling:
+mislabelling is visible, this is an agent buying white sesame when it asked for
+black.**
+
+The prompt fix makes the titles distinct again, and is not sufficient. Identity
+that depends on the model wording a title the same way twice will collide again
+the next time the prompt changes. Identity now comes from the merchant's own
+cells, with price, list price and stock excluded — repricing an item must not
+mint a new id.
+
+The regression test asserts the property under a DELIBERATELY collapsed title,
+because a test that assumes the model behaves cannot catch the model
+misbehaving.
+
+### The dedup half was caught by the test, not by reading the code
+
+First attempt hashed the cells verbatim. `messy-09`'s duplicates are
+cross-sheet and differ in case — `Canvas Shoe White` on one sheet, `canvas
+shoe white` on the other, and Kolhapuri at 650 on one and 675 on the other.
+Verbatim bytes split them into different products. Case-folded and
+whitespace-collapsed now; price was already excluded, so the reprice is fine.
+
+My first version of that test was also wrong — it read only sheet one, where
+all three rows are genuinely different products. The failing test was correct
+about the code and wrong about the fixture.
+
+### `PRICE_AMBIGUOUS` 0/7 — still open, and the clearest evidence for the eval
+
+Seven rows quote a kilo rate beside a sub-kilo pack. The pipeline raises
+`PRICE_AMBIGUOUS` on **none** of them; it produces a confident number and flags
+only `STOCK_NOT_TRACKED`. `₹ 100/Kg` on 250g of adhirasam became a price.
+
+**Under the previous check — `amount_minor > 0` — all seven scored correct.**
+A weak metric did not merely miss this defect, it actively reported it as
+passing. That is the whole argument for the label change, and it is the one
+open defect on the money path. Not fixed here; named rather than buried.
+
+### Published numbers
+
+95% → 99%, both in the document with their prompt fingerprints and a line
+saying what changed, generated from a runs file rather than hand-written. Runs
+2 and 3 share a prompt hash and scored identically, which is a small
+reproducibility signal worth having.
+
+### Stated limitation
+
+Every row on this fixture maps to `food`, so `category` reads 100% and measures
+nothing. The document now DETECTS single-valued fields and says so itself,
+rather than relying on anyone remembering. A second sheet from a different
+trade is the fix, and is deferred: twelve days left and Phases 3-6 ahead.
