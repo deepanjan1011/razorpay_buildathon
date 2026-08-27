@@ -104,6 +104,19 @@ found it. Most of them were found by driving the thing, not by testing it.
 6. **Amounts are integers in minor units.** Never floats, never rupees.
 7. **Every normalized product traces to its source row.**
 
+### Discovery is public; transacting is not
+
+`GET /feeds/{id}` and `GET /feeds/{id}/products` require no credential. This is
+a decision, not an omission: a credential wall in front of a price list makes a
+merchant invisible to the agents that would buy from them, and the friction
+lands before any value is exchanged. The catalogue is published to be read.
+
+Authentication begins where money does. Creating a session and completing one
+require an agent credential, and completing one additionally requires a signed
+mandate. The MCP server's `discover_products` therefore sends no `Authorization`
+header — carrying one implied a protection that does not exist, and it masked a
+real credential bug behind a browse that succeeded anyway.
+
 ### The gate refuses one thing and records everything
 
 The caller gets one reason code — minimal, no enumeration of everything wrong
@@ -156,6 +169,13 @@ Honest deviations, not silent ones.
   instruction; not sound for the arrangement a mandate ultimately wants
 - Agent auth scopes, rotation, delegation. It is a signed-credential check, not
   an identity system
+- **Merchant authentication.** The buyer side is credentialed end to end;
+  the merchant side is not: `POST /api/ingest` and the dashboard pages
+  (`/sessions`, `/upload`) are open in this build, so anyone who can reach the
+  server can upload a catalogue or read the audit trail. Fine on localhost,
+  stated here because it is not fine anywhere else. Mandate issuance is the
+  exception — `POST /api/mandates` requires the agent credential, closing the
+  hole where a stranger could mint spending authority without holding anything
 - OpenAI conformance certification
 
 ---

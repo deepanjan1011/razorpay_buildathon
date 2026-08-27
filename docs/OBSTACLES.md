@@ -2942,3 +2942,39 @@ finally mean what they say.
 This is the direct descendant of the item-price-versus-cart-total bug two
 entries ago — same two quantities, and fixing the comparison left the *fetch*
 still using the wrong one.
+
+---
+
+## 2026-08-27 — Security scan before submission: what was clean, what was not
+
+Scanned for the two failure classes that end a submission: a secret in the
+repo, and a hole in a trust boundary. Method, not vibes: every value in `.env`
+searched byte-for-byte against the working tree AND all 51 commits of history;
+every secret-shaped pattern (`rzp_`, `AIza`, `gsk_`, `ak_`, connection strings,
+PEM headers) grepped across tracked files; then the boundaries walked by hand.
+
+**Clean, verified:** no secret in any commit ever made. SQL fully
+parameterised — zero interpolation inside a query template anywhere. Path
+inputs (`feedId`, `merchant_id`) allowlisted to `[A-Za-z0-9_-]{1,64}` before
+touching disk or DB. Sessions scoped to the credential's merchant, with 404
+rather than 403 for another merchant's session so the response is not an
+existence oracle. Both HMAC compares constant-time and length-guarded. The
+payment fixtures carry Razorpay's documentation personas, not a real person.
+
+**Found and fixed:** `POST /api/mandates` was open. Anyone who could reach the
+server could mint a validly-signed mandate with any ceiling — the symmetric-key
+caveat in the README, escalated from "the verifier could forge one" to "anyone
+could request one". It now requires the agent credential, which the demo was
+already sending, so the fix changed nothing for a legitimate caller.
+
+**Found and declared instead of fixed:** `POST /api/ingest` and the dashboard
+have no merchant authentication, because there is no merchant identity system
+to authenticate against — and building one now is exactly the scaffolding-
+ahead-of-phase this file exists to warn against. README states it plainly.
+
+**Found and accepted:** `npm audit` reports 2 moderate advisories, both the
+`uuid` package inside exceljs (buffer bounds in v3/v5/v6 when a buffer is
+passed — a call shape nothing in this repo uses). The offered fix force-
+downgrades exceljs 4.4 → 3.4, a breaking change to the one library the ingest
+pipeline stands on. Accepted and written down; a silent `--force` here trades a
+theoretical bug for a real one.
