@@ -20,6 +20,8 @@
  */
 import { randomUUID } from "node:crypto";
 
+import { connect } from "../../../lib/db/sql.ts";
+import { authenticate } from "../../../lib/auth/agent.ts";
 import { signMandate } from "../../../lib/mandate/sign.ts";
 import { encodeMandateHeader } from "../../../lib/mandate/store.ts";
 import { isCategory } from "../../../lib/normalize/taxonomy.ts";
@@ -40,6 +42,28 @@ function bad(message: string, param?: string): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // ISSUANCE REQUIRES THE AGENT CREDENTIAL. This was the security scan's one
+  // findable-and-fixable hole: the route was open, so anyone who could reach
+  // the server could mint a validly-signed mandate with any ceiling. Requiring
+  // the credential does not repair the deeper limitation — the seller still
+  // signs with a secret it also verifies with, and the README says so — but it
+  // closes the door where a stranger minted authority without holding anything.
+  // The demo already sent the token here, so nothing observable changed for a
+  // legitimate caller.
+  const sql = await connect();
+  const agent = await authenticate(sql, request);
+  if (!agent) {
+    return new Response(
+      JSON.stringify({
+        type: "invalid_request",
+        code: "invalid_credential",
+        message: "Authorization must carry a valid agent credential",
+        param: "Authorization",
+      }),
+      { status: 401, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } },
+    );
+  }
+
   let body: Record<string, unknown>;
   try {
     body = (await request.json()) as Record<string, unknown>;
