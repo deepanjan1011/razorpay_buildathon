@@ -18,16 +18,22 @@ export const metadata = {
 
 const css = `
   :root {
-    --bg: #0d0f14;
-    --panel: #141821;
-    --line: #1f2531;
-    --text: #e6e8ee;
-    --muted: #8b93a7;
-    --dim: #5c6478;
-    --accent: #8ecbff;
-    --good: #7ee2a8;
-    --bad: #ff9db1;
-    --warn: #ffc178;
+    --bg: #f7f0e4;
+    --panel: #fffcf7;
+    --line: #e7dcc9;
+    --text: #17140f;
+    --muted: #6e6559;
+    --dim: #988c7c;
+    --accent: #e1532a;
+    --good: #1b7a4c;
+    --bad: #b23a1f;
+    --warn: #8a6410;
+    /* Tints for status chips. Light backgrounds, not dark ones — a chip is a
+       label, not a panel, and it must read against the card it sits on. */
+    --good-bg: #e4efe4;
+    --bad-bg: #fbe4de;
+    --warn-bg: #f7ebd5;
+    --neutral-bg: #f2e9da;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -39,6 +45,24 @@ const css = `
   }
   a { color: var(--accent); }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* CARDS CARRY THE LAYOUT, not borders. On a cream ground a hairline plus a
+     very soft shadow separates a panel; a heavy border reads as a table. */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(23, 20, 15, .04);
+  }
+  /* Small uppercase mono for field labels. Carries the hierarchy so the type
+     scale does not have to shout — the numbers stay the loud thing. */
+  .eyebrow {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
   /* Form controls do not inherit colour, so they render as light-on-light
      unless told otherwise — the other half of the same bug. */
   input, button, select {
@@ -49,18 +73,12 @@ const css = `
     border-radius: 6px;
     padding: 8px 10px;
   }
-  button { cursor: pointer; }
+  button { cursor: pointer; border-radius: 8px; }
   button:hover:not(:disabled) { border-color: var(--muted); }
   button:disabled { opacity: .5; cursor: default; }
   input[type="file"] { padding: 6px; }
   label { color: var(--text); }
 `;
-
-const NAV = [
-  ["/", "Overview"],
-  ["/upload", "Upload a catalogue"],
-  ["/sessions", "Audit trail"],
-] as const;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -73,22 +91,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <style>{css}</style>
       </head>
       <body>
-        <nav
-          style={{
-            borderBottom: "1px solid var(--line)",
-            padding: "10px 24px",
-            display: "flex",
-            gap: 20,
-            alignItems: "center",
-          }}
-        >
-          <span style={{ fontWeight: 600, letterSpacing: 0.4 }}>agentready</span>
-          {NAV.map(([href, label]) => (
-            <a key={href} href={href} style={{ fontSize: 13, textDecoration: "none" }}>
-              {label}
-            </a>
-          ))}
-        </nav>
         {children}
       </body>
     </html>

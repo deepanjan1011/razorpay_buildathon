@@ -5,6 +5,7 @@
  * worth looking at is one click away, and building a second surface here would
  * be chrome competing with the artifact that actually answers the track bar.
  */
+import Nav from "../nav.tsx";
 import { connect } from "../../lib/db/sql.ts";
 
 export const dynamic = "force-dynamic";
@@ -18,16 +19,59 @@ type Row = {
   last_reason: string | null;
 };
 
+/**
+ * THE ID LEADS. It is what the demo transcript prints, what the server log
+ * carries, and what a viewer types to open one — so it is the column someone
+ * actually matches a row against. A relative timestamp read better in
+ * isolation and was worse at the only job this table has.
+ */
+
 const STATUS_COLOUR: Record<string, string> = {
-  ready_for_payment: "#8ecbff",
-  complete_in_progress: "#ffc178",
-  completed: "#7ee2a8",
-  canceled: "#8b93a7",
-  expired: "#8b93a7",
-  not_ready_for_payment: "#ff9db1",
+  // NOT the accent. A cart priced and waiting is the ordinary case, and
+  // painting it the same colour as a refusal makes the page read as a wall of
+  // alarms — which is the opposite of what a reader scans this list for.
+  ready_for_payment: "#6e6559",
+  complete_in_progress: "#8a6410",
+  completed: "#1b7a4c",
+  canceled: "#6e6559",
+  expired: "#6e6559",
+  not_ready_for_payment: "#b23a1f",
 };
 
-export default async function Sessions() {
+/**
+ * Filters as LINKS and "show more" as a bigger limit in the URL — no client
+ * component, no state, no bundle. A filtered view is a different page, and the
+ * platform already has an address for that. It also means a viewer can send
+ * someone "the refusals" rather than "open this and click the second tab".
+ *
+ * The filter is never interpolated into SQL: the query fragment is chosen from
+ * a fixed map, so an unknown value degrades to `all` rather than reaching the
+ * database. `limit` is clamped for the same reason.
+ */
+const FILTERS = {
+  all: { label: "All", having: "" },
+  refused: { label: "Refused", having: "having count(a.event_id) filter (where a.outcome = 'refused') > 0" },
+  today: { label: "Today", having: "having max(s.updated_at) >= date_trunc('day', now())" },
+} as const;
+
+type FilterKey = keyof typeof FILTERS;
+
+const PAGE = 15;
+
+const isFilter = (v: unknown): v is FilterKey =>
+  typeof v === "string" && Object.hasOwn(FILTERS, v);
+
+export default async function Sessions({
+  searchParams,
+}: {
+  searchParams: Promise<{ filter?: string; limit?: string }>;
+}) {
+  const params = await searchParams;
+  const filter: FilterKey = isFilter(params.filter) ? params.filter : "all";
+  const raw = Number(params.limit);
+  // Clamped, not trusted. A limit from a URL is user input on a table scan.
+  const limit = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), PAGE), 200) : PAGE;
+
   const sql = await connect();
   // Joined against the audit log rather than the session row, because "what
   // happened" is the question this page exists to answer — a session with three
@@ -42,48 +86,208 @@ export default async function Sessions() {
        from checkout_session s
        left join audit_event a on a.session_id = s.id
       group by s.id, s.status, s.updated_at
+      ${FILTERS[filter].having}
       order by s.updated_at desc
-      limit 40`,
+      limit $1`,
+    // One more than asked for, purely to answer "is there a next page" without
+    // a second count query over the same join.
+    [limit + 1],
   );
 
+  const hasMore = rows.length > limit;
+  const visible = hasMore ? rows.slice(0, limit) : rows;
+  const href = (f: FilterKey, l: number) => `/sessions?filter=${f}${l > PAGE ? `&limit=${l}` : ""}`;
+
   return (
-    <main style={{ background: "#0d0f14", color: "#e6e8ee", minHeight: "100vh", padding: "32px 24px", fontFamily: "ui-sans-serif, system-ui" }}>
-      <div style={{ maxWidth: 900, margin: "0 auto" }}>
-        <div style={{ fontSize: 12, color: "#8b93a7", letterSpacing: 1 }}>AGENTREADY</div>
-        <h1 style={{ fontSize: 22, margin: "6px 0 4px" }}>Checkout sessions</h1>
-        <p style={{ fontSize: 13, color: "#8b93a7", marginTop: 0 }}>
+    <main style={{ background: "#f7f0e4", color: "#17140f", minHeight: "100vh", padding: "32px 24px", fontFamily: "ui-sans-serif, system-ui" }}>
+      <Nav active="sessions" />
+      <div style={{ maxWidth: 1040, margin: "0 auto" }}>
+        <div className="eyebrow">
+          <span style={{ color: "var(--accent)" }}>——</span> Sessions
+        </div>
+        <h1 style={{ fontSize: 32, margin: "8px 0 4px", letterSpacing: -0.8, fontWeight: 750 }}>
+          Every checkout, and why.
+        </h1>
+        <p style={{ fontSize: 13, color: "#6e6559", marginTop: 0 }}>
           Most recent first. Open one to see every decision it made and why.
         </p>
 
-        {rows.length === 0 ? (
-          <p style={{ color: "#8b93a7" }}>
-            No sessions yet. Run <code>npm run demo</code>.
+        <div style={{ display: "flex", gap: 6, marginTop: 16 }}>
+          {(Object.keys(FILTERS) as FilterKey[]).map((key) => {
+            const on = key === filter;
+            return (
+              <a
+                key={key}
+                href={href(key, PAGE)}
+                style={{
+                  fontSize: 12,
+                  fontWeight: on ? 650 : 500,
+                  textDecoration: "none",
+                  color: on ? "var(--panel)" : "var(--muted)",
+                  background: on ? "var(--text)" : "var(--panel)",
+                  border: `1px solid ${on ? "var(--text)" : "var(--line)"}`,
+                  padding: "6px 14px",
+                  borderRadius: 999,
+                }}
+              >
+                {FILTERS[key].label}
+              </a>
+            );
+          })}
+        </div>
+
+        {visible.length === 0 ? (
+          <p style={{ color: "#6e6559", marginTop: 20 }}>
+            {filter === "all" ? (
+              <>
+                No sessions yet. Run <code>npm run demo</code>.
+              </>
+            ) : (
+              <>
+                Nothing matches this filter. <a href={href("all", PAGE)}>Show all sessions →</a>
+              </>
+            )}
           </p>
         ) : (
-          <div style={{ marginTop: 20 }}>
-            {rows.map((r) => (
+          <div className="card" style={{ marginTop: 20, padding: "4px 8px" }}>
+            <div
+              className="eyebrow"
+              style={{ display: "flex", gap: 16, padding: "10px 12px 8px", borderBottom: "1px solid var(--line)" }}
+            >
+              <span style={{ flex: "0 1 250px" }}>Session</span>
+              <span style={{ flex: "0 0 170px" }}>Status</span>
+              <span style={{ flex: 1 }}>Outcome</span>
+              <span style={{ flex: "0 0 62px", textAlign: "right" }}>Events</span>
+            </div>
+            {visible.map((r) => (
               <a
                 key={r.id}
                 href={`/sessions/${r.id}`}
                 style={{
                   display: "flex", gap: 16, alignItems: "center", padding: "10px 12px",
-                  borderBottom: "1px solid #1b1f2a", textDecoration: "none", color: "inherit",
+                  borderBottom: "1px solid #f2e9da", textDecoration: "none", color: "inherit",
                 }}
               >
-                <code style={{ fontSize: 13, color: "#e6e8ee", flex: "0 0 250px" }}>{r.id}</code>
-                <span style={{ fontSize: 12, color: STATUS_COLOUR[r.status] ?? "#8b93a7", flex: "0 0 170px" }}>
-                  {r.status}
+                <code style={{ fontSize: 13, color: "#17140f", flex: "0 1 250px" }}>{r.id}</code>
+                {/* A chip, not coloured text: status is a category, and a bare
+                    coral word reads as an alarm on a row that is merely waiting. */}
+                <span style={{ flex: "0 0 170px" }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: STATUS_COLOUR[r.status] ?? "#6e6559",
+                      background: "var(--neutral-bg)",
+                      padding: "3px 8px",
+                      borderRadius: 999,
+                    }}
+                  >
+                    {r.status}
+                  </span>
                 </span>
-                {/* The refusal count first, because a session that was refused
-                    is the one a reader came here to find. */}
-                <span style={{ fontSize: 12, color: r.refusals > 0 ? "#ff9db1" : "#5c6478", flex: "0 0 100px" }}>
-                  {r.refusals > 0 ? `${r.refusals} refused` : "—"}
+                {/* COUNT AND REASON IN ONE COLUMN. They were two, and they were
+                    redundant: a reason code exists only where something was
+                    refused, so the pair was always either "— / blank" or
+                    "n refused / CODE". Merging them gives the reason — the only
+                    part that says anything — the width it was being denied.
+                    min-width:0 or the flex item refuses to shrink below its
+                    content and pushes the events column off the card. */}
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: 8,
+                    overflow: "hidden",
+                  }}
+                >
+                  {r.refusals > 0 ? (
+                    <>
+                      <span style={{ fontSize: 12, color: "#b23a1f", whiteSpace: "nowrap" }}>
+                        {r.refusals} refused
+                      </span>
+                      <code
+                        style={{
+                          fontSize: 11,
+                          color: "#6e6559",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {r.last_reason ?? ""}
+                      </code>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: 12, color: "#988c7c" }}>—</span>
+                  )}
                 </span>
-                <code style={{ fontSize: 11, color: "#8b93a7", flex: 1 }}>{r.last_reason ?? ""}</code>
-                <span style={{ fontSize: 11, color: "#5c6478" }}>{r.events} events</span>
+                <span style={{ fontSize: 11, color: "#988c7c", flex: "0 0 62px", whiteSpace: "nowrap", textAlign: "right" }}>
+                  {r.events} events
+                </span>
               </a>
             ))}
           </div>
+        )}
+
+        {/* LINKS, not buttons. They survive a reload, they can be sent to
+            someone, and they need no JavaScript — the row count lives in the
+            URL where the filter already does.
+
+            Collapse appears as soon as the list has been expanded, including
+            while more rows remain: someone forty rows deep should not have to
+            reach the end before they can get back to a readable page. */}
+        {(hasMore || limit > PAGE) && (
+          <div
+            style={{
+              marginTop: 16,
+              display: "flex",
+              gap: 10,
+              justifyContent: "center",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            {hasMore && (
+              <a
+                href={href(filter, limit + 25)}
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textDecoration: "none",
+                  color: "var(--text)",
+                  background: "var(--panel)",
+                  border: "1px solid var(--line)",
+                  padding: "9px 20px",
+                  borderRadius: 999,
+                }}
+              >
+                Show 25 more
+              </a>
+            )}
+            {limit > PAGE && (
+              <a
+                href={href(filter, PAGE)}
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textDecoration: "none",
+                  color: "var(--muted)",
+                  padding: "9px 16px",
+                  borderRadius: 999,
+                }}
+              >
+                ↑ Collapse
+              </a>
+            )}
+          </div>
+        )}
+
+        {!hasMore && (
+          <p style={{ textAlign: "center", fontSize: 12, color: "var(--dim)", marginTop: 12 }}>
+            That is all {visible.length}.
+          </p>
         )}
       </div>
     </main>

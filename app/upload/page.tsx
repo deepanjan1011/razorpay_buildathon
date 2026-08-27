@@ -13,6 +13,7 @@
  */
 "use client";
 
+import Nav from "../nav.tsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Failure = { batch_index: number; reason_code: string; reason_human: string };
@@ -95,13 +96,23 @@ export default function UploadPage() {
 
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 640, margin: "3rem auto", padding: "0 1rem" }}>
-      <h1 style={{ fontSize: "1.4rem" }}>Upload a catalogue</h1>
+      <Nav active="upload" />
+      <div className="eyebrow">
+        <span style={{ color: "var(--accent)" }}>——</span> Ingest
+      </div>
+      <h1 style={{ fontSize: 32, margin: "8px 0 4px", letterSpacing: -0.8, fontWeight: 750 }}>
+        Upload a catalogue
+      </h1>
       <p style={{ color: "var(--muted)", fontSize: ".9rem" }}>
         A spreadsheet of products. Messy is fine — merged cells, notes above the
         header, prices written any way at all.
       </p>
 
-      <form onSubmit={submit} style={{ display: "grid", gap: ".75rem", margin: "1.5rem 0" }}>
+      <form
+        onSubmit={submit}
+        className="card"
+        style={{ display: "grid", gap: ".75rem", margin: "1.5rem 0", padding: "18px 20px" }}
+      >
         <label style={{ display: "grid", gap: ".25rem", fontSize: ".9rem" }}>
           Merchant id
           <input
@@ -119,7 +130,22 @@ export default function UploadPage() {
           <input name="file" type="file" accept=".xlsx,.xls" required />
         </label>
 
-        <button type="submit" disabled={busy} style={{ padding: ".5rem", cursor: "pointer" }}>
+        {/* The one primary action on the page, so it is the only filled
+            control. A page where everything is emphasised emphasises nothing. */}
+        <button
+          type="submit"
+          disabled={busy}
+          style={{
+            padding: "10px 16px",
+            cursor: "pointer",
+            background: "var(--text)",
+            color: "var(--panel)",
+            border: "1px solid var(--text)",
+            borderRadius: 999,
+            fontWeight: 600,
+            justifySelf: "start",
+          }}
+        >
           {busy ? "Uploading…" : "Upload"}
         </button>
       </form>
@@ -131,7 +157,7 @@ export default function UploadPage() {
       )}
 
       {progress && (
-        <section style={{ borderTop: "1px solid #ddd", paddingTop: "1rem" }}>
+        <section style={{ borderTop: "1px solid #e7dcc9", paddingTop: "1rem" }}>
           <p style={{ fontFamily: "monospace", fontSize: ".85rem" }}>
             {progress.id} — <strong>{progress.status}</strong>
             {progress.resumed && " (resumed)"}

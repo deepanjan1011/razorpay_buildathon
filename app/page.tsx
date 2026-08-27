@@ -7,6 +7,7 @@
  * surfaces that are real: a merchant uploading a spreadsheet, and the audit
  * trail behind a purchase.
  */
+import Nav from "./nav.tsx";
 import { connect } from "../lib/db/sql.ts";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +31,47 @@ async function counts() {
   }
 }
 
+/**
+ * THE MOST RECENT REAL REFUSAL, on the front page.
+ *
+ * Written after watching someone land on /sessions cold: it is forty opaque
+ * ids, and the one row that carries the entire argument looks exactly like the
+ * thirty-nine that do not. A visitor with no guide clicks something at random,
+ * gets a three-event allowed session, and leaves — having seen a list, not a
+ * product. So the refusal comes to them, with both numbers and a way in.
+ *
+ * Live, not a screenshot: if the gate ever stops refusing, this card empties
+ * and the claim disappears with it, which is the correct failure mode.
+ */
+async function latestRefusal() {
+  try {
+    const sql = await connect();
+    const { rows } = await sql.query<{
+      session_id: string;
+      reason_code: string;
+      cart: number | null;
+      ceiling: number | null;
+    }>(
+      `select session_id,
+              reason_code,
+              (evidence->>'cart_total_minor')::bigint      as cart,
+              (evidence->>'mandate_ceiling_minor')::bigint as ceiling
+         from audit_event
+        where outcome = 'refused'
+          and evidence ? 'cart_total_minor'
+          and evidence ? 'mandate_ceiling_minor'
+        order by seq desc
+        limit 1`,
+    );
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const rupees = (minor: number | null) =>
+  minor === null ? "—" : `₹${(Number(minor) / 100).toFixed(2)}`;
+
 const Card = ({ href, title, body }: { href: string; title: string; body: string }) => (
   <a
     href={href}
@@ -44,12 +86,16 @@ const Card = ({ href, title, body }: { href: string; title: string; body: string
 );
 
 export default async function Home() {
-  const c = await counts();
+  const [c, refusal] = await Promise.all([counts(), latestRefusal()]);
 
   return (
     <main style={{ padding: "44px 24px" }}>
-      <div style={{ maxWidth: 780, margin: "0 auto" }}>
-        <h1 style={{ fontSize: 30, margin: 0, lineHeight: 1.25 }}>
+      <Nav active="overview" />
+      <div style={{ maxWidth: 1040, margin: "0 auto" }}>
+        <div className="eyebrow">
+          <span style={{ color: "var(--accent)" }}>——</span> Overview
+        </div>
+        <h1 style={{ fontSize: 36, margin: "10px 0 0", lineHeight: 1.15, letterSpacing: -1, fontWeight: 750 }}>
           A spreadsheet merchant,
           <br />
           transactable by AI buyers.
@@ -62,18 +108,57 @@ export default async function Home() {
         </p>
 
         {c && (
-          <div style={{ display: "flex", gap: 28, margin: "24px 0 30px" }}>
+          <div style={{ display: "flex", gap: 14, margin: "26px 0 30px", flexWrap: "wrap" }}>
             {[
-              [c.variants, "products live"],
-              [c.sessions, "checkout sessions"],
-              [c.refusals, "refusals recorded"],
-            ].map(([n, label]) => (
-              <div key={String(label)}>
-                <div style={{ fontSize: 24, fontWeight: 600 }}>{String(n)}</div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>{String(label)}</div>
+              [c.variants, "products live", "from one spreadsheet"],
+              [c.sessions, "checkout sessions", "priced authoritatively"],
+              [c.refusals, "refusals recorded", "each with a reason code"],
+            ].map(([n, label, sub]) => (
+              <div
+                key={String(label)}
+                className="card"
+                style={{ padding: "14px 18px", flex: "1 1 180px" }}
+              >
+                <div className="eyebrow">{String(label)}</div>
+                <div style={{ fontSize: 32, fontWeight: 750, letterSpacing: -0.8, margin: "4px 0 2px" }}>
+                  {String(n)}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>{String(sub)}</div>
               </div>
             ))}
           </div>
+        )}
+
+        {refusal && (
+          <a
+            href={`/sessions/${refusal.session_id}`}
+            className="card"
+            style={{
+              display: "block",
+              padding: "20px 22px",
+              marginBottom: 14,
+              textDecoration: "none",
+              color: "inherit",
+              borderLeft: "3px solid var(--bad)",
+            }}
+          >
+            <div className="eyebrow">A real refusal · from the last run</div>
+            <div style={{ display: "flex", gap: 18, alignItems: "center", margin: "12px 0 10px", flexWrap: "wrap" }}>
+              <div style={{ fontSize: 30, fontWeight: 750, color: "var(--bad)", letterSpacing: -0.6 }}>
+                {rupees(refusal.cart)}
+              </div>
+              <div style={{ fontSize: 18, color: "var(--dim)" }}>&gt;</div>
+              <div style={{ fontSize: 30, fontWeight: 750, letterSpacing: -0.6 }}>
+                {rupees(refusal.ceiling)}
+              </div>
+              <code style={{ fontSize: 12, color: "var(--bad)" }}>{refusal.reason_code}</code>
+            </div>
+            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
+              The cart cost more than the buyer authorised, so no payment call was made.
+              The agent was told why, offered something the mandate could afford, and took it.{" "}
+              <span style={{ color: "var(--accent)", fontWeight: 600 }}>See the full trail →</span>
+            </div>
+          </a>
         )}
 
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
