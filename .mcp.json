@@ -4,8 +4,7 @@
       "command": "node",
       "args": ["mcp/server.ts"],
       "env": {
-        "AGENTREADY_BASE_URL": "http://localhost:3000",
-        "AGENT_TOKEN": "${AGENT_TOKEN}"
+        "AGENTREADY_BASE_URL": "http://localhost:3000"
       }
     }
   }

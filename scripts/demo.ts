@@ -25,8 +25,26 @@ await client.connect(
   }),
 );
 
-const text = (r: unknown) =>
-  JSON.parse((r as { content: Array<{ text: string }> }).content[0]?.text ?? "{}");
+/**
+ * A tool result, or a stop with the reason printed.
+ *
+ * A REFUSAL IS NOT AN ERROR and must not stop here — it is what the demo
+ * exists to show, and it carries `refused`, never `error`. What stops the run
+ * is the setup being wrong: no API, no token, no feed. Those used to surface
+ * three lines later as `Cannot read properties of undefined`, which names the
+ * symptom and not the cause, in front of whoever is watching.
+ */
+const text = (r: unknown) => {
+  const parsed = JSON.parse(
+    (r as { content: Array<{ text: string }> }).content[0]?.text ?? "{}",
+  );
+  if (parsed.error) {
+    console.error(`\n  cannot run the demo — ${parsed.error}`);
+    console.error(`  ${parsed.message ?? ""}\n`);
+    process.exit(1);
+  }
+  return parsed;
+};
 
 const mint = async (body: Record<string, unknown>) => {
   const r = await fetch("http://localhost:3000/api/mandates", {

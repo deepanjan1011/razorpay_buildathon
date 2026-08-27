@@ -76,13 +76,36 @@ function headers(extra: Record<string, string> = {}): Record<string, string> {
   };
 }
 
+/**
+ * DISCOVERY CARRIES NO CREDENTIAL, because the endpoint it calls has none.
+ *
+ * `GET /feeds/{id}/products` is deliberately unauthenticated: a credential wall
+ * in front of a price list makes a merchant invisible to the agents that would
+ * buy from them, and the friction lands before any value is exchanged. So
+ * authentication begins where money does — creating a session and completing
+ * one — and not before.
+ *
+ * Sending `Authorization` here anyway was worse than useless. It implied a
+ * protection that does not exist, and it hid a real bug: a client launched with
+ * a junk token browsed the catalogue successfully and only failed at checkout,
+ * so the 401 looked like a checkout problem rather than a credential one.
+ */
+function publicHeaders(): Record<string, string> {
+  return { "API-Version": API_VERSION, "Content-Type": "application/json" };
+}
+
 /** A fresh key per call. Invariant 4: retries are the caller's, not ours. */
 const idem = () => `mcp-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 
 type Json = Record<string, unknown>;
 
-async function call(path: string, init: RequestInit): Promise<{ status: number; body: Json }> {
-  if (!token()) {
+async function call(
+  path: string,
+  init: RequestInit,
+  /** False for the public read surface, which needs no credential to serve. */
+  needsAuth = true,
+): Promise<{ status: number; body: Json }> {
+  if (needsAuth && !token()) {
     // Named rather than left as a 401. "invalid_credential" on every call is
     // indistinguishable from a revoked token, and sends whoever is debugging
     // to the wrong place entirely.
@@ -96,7 +119,29 @@ async function call(path: string, init: RequestInit): Promise<{ status: number; 
       },
     };
   }
-  const res = await fetch(`${BASE}${path}`, init);
+  // THE API BEING DOWN IS A NAMED RESULT, NOT A THROW.
+  //
+  // `fetch` rejects with the bare string "fetch failed" when nothing is
+  // listening. Left unhandled it escapes the tool handler, the SDK returns it
+  // as the result's text, and the caller's `JSON.parse` dies on it — so a dev
+  // server nobody started surfaces as `SyntaxError: Unexpected token 'e'`,
+  // which names neither the cause nor the fix. Same lesson as `no_agent_token`
+  // directly above: an unnamed failure sends the reader to the wrong place.
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, init);
+  } catch (error) {
+    return {
+      status: 0,
+      body: {
+        error: "api_unreachable",
+        message:
+          `Cannot reach the agentready API at ${BASE}. Start it with \`npm run dev\`, ` +
+          `or set AGENTREADY_BASE_URL if it runs elsewhere.`,
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
   const text = await res.text();
   let body: Json;
   try {
@@ -138,9 +183,12 @@ server.registerTool(
     },
   },
   async ({ feed_id, query, limit }) => {
-    const { status, body } = await call(`/api/feeds/${encodeURIComponent(feed_id)}/products`, {
-      headers: headers(),
-    });
+    const { status, body } = await call(
+      `/api/feeds/${encodeURIComponent(feed_id)}/products`,
+      { headers: publicHeaders() },
+      false,
+    );
+    if (status === 0) return asText(body);
     if (status !== 200) return asText({ error: "feed_unavailable", status, body });
 
     // VARIANTS, NOT PRODUCTS. The id an agent is handed here must be the id
@@ -230,6 +278,7 @@ server.registerTool(
         }),
       }),
     });
+    if (status === 0) return asText(body);
     if (status !== 201) return asText({ error: body["code"] ?? "create_failed", status, message: body["message"] });
 
     return asText({
@@ -269,6 +318,13 @@ server.registerTool(
         body: JSON.stringify({ payment_data: { handler_id: "razorpay_link" } }),
       },
     );
+
+    // A TRANSPORT FAILURE IS NOT A REFUSAL, and conflating them inverts
+    // invariant 4. `status === 0` means no request reached the gate at all —
+    // reporting it below as `refused` with `retryable: false` would tell an
+    // agent that authority was denied and that trying again is pointless, when
+    // the truth is the opposite on both counts.
+    if (status === 0) return asText({ ...body, retryable: true });
 
     if (status !== 200) {
       const alternatives = Array.isArray(body["alternatives"]) ? body["alternatives"] : [];
