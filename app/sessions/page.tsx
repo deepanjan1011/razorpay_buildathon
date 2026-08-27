@@ -6,6 +6,7 @@
  * be chrome competing with the artifact that actually answers the track bar.
  */
 import Nav from "../nav.tsx";
+import { TransitionLink } from "./navigation.tsx";
 import { connect } from "../../lib/db/sql.ts";
 
 export const dynamic = "force-dynamic";
@@ -26,16 +27,26 @@ type Row = {
  * isolation and was worse at the only job this table has.
  */
 
-const STATUS_COLOUR: Record<string, string> = {
+type StatusStyle = { color: string; bg: string };
+
+/**
+ * The fallback is a VALUE, not another lookup. `STATUS_STYLES[x] ?? STATUS_STYLES.y`
+ * reads as a default and is not one: under `noUncheckedIndexedAccess` the second
+ * lookup is `| undefined` too, so the expression never actually guarantees a
+ * style — and a status this map has not met yet is exactly when it is needed.
+ */
+const STATUS_DEFAULT: StatusStyle = { color: "var(--muted)", bg: "var(--neutral-bg)" };
+
+const STATUS_STYLES: Record<string, StatusStyle> = {
   // NOT the accent. A cart priced and waiting is the ordinary case, and
   // painting it the same colour as a refusal makes the page read as a wall of
   // alarms — which is the opposite of what a reader scans this list for.
-  ready_for_payment: "#6e6559",
-  complete_in_progress: "#8a6410",
-  completed: "#1b7a4c",
-  canceled: "#6e6559",
-  expired: "#6e6559",
-  not_ready_for_payment: "#b23a1f",
+  ready_for_payment: { color: "var(--muted)", bg: "var(--neutral-bg)" },
+  complete_in_progress: { color: "var(--warn)", bg: "var(--warn-bg)" },
+  completed: { color: "var(--good)", bg: "var(--good-bg)" },
+  canceled: { color: "var(--muted)", bg: "var(--neutral-bg)" },
+  expired: { color: "var(--muted)", bg: "var(--neutral-bg)" },
+  not_ready_for_payment: { color: "var(--bad)", bg: "var(--bad-bg)" },
 };
 
 /**
@@ -99,16 +110,16 @@ export default async function Sessions({
   const href = (f: FilterKey, l: number) => `/sessions?filter=${f}${l > PAGE ? `&limit=${l}` : ""}`;
 
   return (
-    <main style={{ background: "#f7f0e4", color: "#17140f", minHeight: "100vh", padding: "32px 24px", fontFamily: "ui-sans-serif, system-ui" }}>
+    <main style={{ padding: "32px 24px 64px" }}>
       <Nav active="sessions" />
-      <div style={{ maxWidth: 1040, margin: "0 auto" }}>
-        <div className="eyebrow">
+      <div className="animate-in" style={{ maxWidth: 1040, margin: "0 auto", animationDelay: "0.1s", animationFillMode: "both" }}>
+        <div className="eyebrow" style={{ marginTop: "24px" }}>
           <span style={{ color: "var(--accent)" }}>——</span> Sessions
         </div>
-        <h1 style={{ fontSize: 32, margin: "8px 0 4px", letterSpacing: -0.8, fontWeight: 750 }}>
+        <h1 style={{ fontSize: 42, margin: "14px 0 0", letterSpacing: "-0.03em", fontWeight: 800 }}>
           Every checkout, and why.
         </h1>
-        <p style={{ fontSize: 13, color: "#6e6559", marginTop: 0 }}>
+        <p style={{ fontSize: 16, color: "var(--muted)", marginTop: 12 }}>
           Most recent first. Open one to see every decision it made and why.
         </p>
 
@@ -116,22 +127,14 @@ export default async function Sessions({
           {(Object.keys(FILTERS) as FilterKey[]).map((key) => {
             const on = key === filter;
             return (
-              <a
+              <TransitionLink
                 key={key}
                 href={href(key, PAGE)}
-                style={{
-                  fontSize: 12,
-                  fontWeight: on ? 650 : 500,
-                  textDecoration: "none",
-                  color: on ? "var(--panel)" : "var(--muted)",
-                  background: on ? "var(--text)" : "var(--panel)",
-                  border: `1px solid ${on ? "var(--text)" : "var(--line)"}`,
-                  padding: "6px 14px",
-                  borderRadius: 999,
-                }}
+                className="pill"
+                data-active={on}
               >
                 {FILTERS[key].label}
-              </a>
+              </TransitionLink>
             );
           })}
         </div>
@@ -144,7 +147,7 @@ export default async function Sessions({
               </>
             ) : (
               <>
-                Nothing matches this filter. <a href={href("all", PAGE)}>Show all sessions →</a>
+                Nothing matches this filter. <TransitionLink href={href("all", PAGE)}>Show all sessions →</TransitionLink>
               </>
             )}
           </p>
@@ -152,33 +155,35 @@ export default async function Sessions({
           <div className="card" style={{ marginTop: 20, padding: "4px 8px" }}>
             <div
               className="eyebrow"
-              style={{ display: "flex", gap: 16, padding: "10px 12px 8px", borderBottom: "1px solid var(--line)" }}
+              style={{ display: "flex", gap: 16, padding: "16px 20px 12px", borderBottom: "1px solid var(--line)" }}
             >
               <span style={{ flex: "0 1 250px" }}>Session</span>
               <span style={{ flex: "0 0 170px" }}>Status</span>
               <span style={{ flex: 1 }}>Outcome</span>
               <span style={{ flex: "0 0 62px", textAlign: "right" }}>Events</span>
             </div>
-            {visible.map((r) => (
-              <a
+            {visible.map((r) => {
+              const statusStyle = STATUS_STYLES[r.status] ?? STATUS_DEFAULT;
+              return (
+              <TransitionLink
                 key={r.id}
                 href={`/sessions/${r.id}`}
                 style={{
-                  display: "flex", gap: 16, alignItems: "center", padding: "10px 12px",
-                  borderBottom: "1px solid #f2e9da", textDecoration: "none", color: "inherit",
+                  display: "flex", gap: 16, alignItems: "center", padding: "16px 20px",
+                  borderBottom: "1px solid var(--line)", textDecoration: "none", color: "inherit",
                 }}
               >
-                <code style={{ fontSize: 13, color: "#17140f", flex: "0 1 250px" }}>{r.id}</code>
+                <code style={{ fontSize: 14, color: "var(--text)", flex: "0 1 250px", fontWeight: 500 }}>{r.id}</code>
                 {/* A chip, not coloured text: status is a category, and a bare
                     coral word reads as an alarm on a row that is merely waiting. */}
                 <span style={{ flex: "0 0 170px" }}>
                   <span
                     style={{
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: 600,
-                      color: STATUS_COLOUR[r.status] ?? "#6e6559",
-                      background: "var(--neutral-bg)",
-                      padding: "3px 8px",
+                      color: statusStyle.color,
+                      background: statusStyle.bg,
+                      padding: "4px 10px",
                       borderRadius: 999,
                     }}
                   >
@@ -197,20 +202,20 @@ export default async function Sessions({
                     flex: 1,
                     minWidth: 0,
                     display: "flex",
-                    alignItems: "baseline",
-                    gap: 8,
+                    alignItems: "center",
+                    gap: 10,
                     overflow: "hidden",
                   }}
                 >
                   {r.refusals > 0 ? (
                     <>
-                      <span style={{ fontSize: 12, color: "#b23a1f", whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 13, color: "var(--bad)", whiteSpace: "nowrap", fontWeight: 600 }}>
                         {r.refusals} refused
                       </span>
                       <code
                         style={{
-                          fontSize: 11,
-                          color: "#6e6559",
+                          fontSize: 12,
+                          color: "var(--muted)",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
@@ -220,14 +225,14 @@ export default async function Sessions({
                       </code>
                     </>
                   ) : (
-                    <span style={{ fontSize: 12, color: "#988c7c" }}>—</span>
+                    <span style={{ fontSize: 14, color: "var(--dim)" }}>—</span>
                   )}
                 </span>
-                <span style={{ fontSize: 11, color: "#988c7c", flex: "0 0 62px", whiteSpace: "nowrap", textAlign: "right" }}>
+                <span style={{ fontSize: 13, color: "var(--muted)", flex: "0 0 62px", whiteSpace: "nowrap", textAlign: "right" }}>
                   {r.events} events
                 </span>
-              </a>
-            ))}
+              </TransitionLink>
+            );})}
           </div>
         )}
 
@@ -250,36 +255,24 @@ export default async function Sessions({
             }}
           >
             {hasMore && (
-              <a
+              <TransitionLink
                 href={href(filter, limit + 25)}
-                style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  textDecoration: "none",
-                  color: "var(--text)",
-                  background: "var(--panel)",
-                  border: "1px solid var(--line)",
-                  padding: "9px 20px",
-                  borderRadius: 999,
-                }}
+                pendingText="Loading..."
+                className="pill"
+                style={{ padding: "9px 20px" }}
               >
                 Show 25 more
-              </a>
+              </TransitionLink>
             )}
             {limit > PAGE && (
-              <a
+              <TransitionLink
                 href={href(filter, PAGE)}
-                style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  textDecoration: "none",
-                  color: "var(--muted)",
-                  padding: "9px 16px",
-                  borderRadius: 999,
-                }}
+                pendingText="Collapsing..."
+                className="pill"
+                style={{ background: "transparent", borderStyle: "dashed" }}
               >
                 ↑ Collapse
-              </a>
+              </TransitionLink>
             )}
           </div>
         )}

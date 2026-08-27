@@ -56,10 +56,17 @@ export type CartFacts = {
 /**
  * Machine reason codes. Specific on purpose: the audit trail is the judged
  * artifact, and a refusal that names a non-cause will be believed.
+ *
+ * EVERY MEMBER IS REACHABLE. Three preconditions and five peer checks, and this
+ * list is exactly the eight things they can say. `MANDATE_UNKNOWN` used to sit
+ * here and nothing could ever emit it: it presumed a lookup by mandate id, and
+ * mandates travel in a header rather than being stored and fetched, so the
+ * situation it named cannot arise. A code that cannot happen is a claim this
+ * vocabulary makes and cannot keep — the same defect as a refusal naming a
+ * non-cause, one level up.
  */
 export type MandateReasonCode =
   | "MANDATE_MISSING"
-  | "MANDATE_UNKNOWN"
   | "MANDATE_SIGNATURE_INVALID"
   | "MANDATE_EXPIRED"
   | "MANDATE_NOT_YET_VALID"
@@ -80,7 +87,6 @@ export type MandateReasonCode =
  */
 export const ACP_CODE: Record<MandateReasonCode, string> = {
   MANDATE_MISSING: "approval_required",
-  MANDATE_UNKNOWN: "not_found",
   MANDATE_SIGNATURE_INVALID: "invalid",
   MANDATE_EXPIRED: "expired",
   MANDATE_NOT_YET_VALID: "invalid",

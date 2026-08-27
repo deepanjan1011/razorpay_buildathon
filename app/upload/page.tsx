@@ -95,25 +95,26 @@ export default function UploadPage() {
       : 0;
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 640, margin: "3rem auto", padding: "0 1rem" }}>
+    <main style={{ maxWidth: 680, margin: "3rem auto", padding: "0 1.5rem 4rem" }}>
       <Nav active="upload" />
-      <div className="eyebrow">
-        <span style={{ color: "var(--accent)" }}>——</span> Ingest
-      </div>
-      <h1 style={{ fontSize: 32, margin: "8px 0 4px", letterSpacing: -0.8, fontWeight: 750 }}>
-        Upload a catalogue
-      </h1>
-      <p style={{ color: "var(--muted)", fontSize: ".9rem" }}>
-        A spreadsheet of products. Messy is fine — merged cells, notes above the
-        header, prices written any way at all.
-      </p>
+      <div className="animate-in" style={{ animationDelay: "0.1s", animationFillMode: "both" }}>
+        <div className="eyebrow" style={{ marginTop: "24px" }}>
+          <span style={{ color: "var(--accent)" }}>——</span> Ingest
+        </div>
+        <h1 style={{ fontSize: 42, margin: "14px 0 0", letterSpacing: "-0.03em", fontWeight: 800 }}>
+          Upload a catalogue
+        </h1>
+        <p style={{ color: "var(--muted)", fontSize: 16, marginTop: 12, lineHeight: 1.6 }}>
+          A spreadsheet of products. Messy is fine — merged cells, notes above the
+          header, prices written any way at all.
+        </p>
 
       <form
         onSubmit={submit}
         className="card"
-        style={{ display: "grid", gap: ".75rem", margin: "1.5rem 0", padding: "18px 20px" }}
+        style={{ display: "grid", gap: "20px", margin: "32px 0", padding: "28px 32px" }}
       >
-        <label style={{ display: "grid", gap: ".25rem", fontSize: ".9rem" }}>
+        <label style={{ display: "grid", gap: "8px", fontSize: 15 }}>
           Merchant id
           <input
             name="merchant_id"
@@ -121,29 +122,27 @@ export default function UploadPage() {
             onChange={(e) => setMerchantId(e.target.value)}
             pattern="[A-Za-z0-9_-]{1,64}"
             required
-            style={{ padding: ".4rem", fontFamily: "monospace" }}
+            style={{ fontFamily: "monospace", fontSize: 14 }}
           />
         </label>
 
-        <label style={{ display: "grid", gap: ".25rem", fontSize: ".9rem" }}>
+        <label style={{ display: "grid", gap: "8px", fontSize: 15 }}>
           Spreadsheet
-          <input name="file" type="file" accept=".xlsx,.xls" required />
+          <input name="file" type="file" accept=".xlsx,.xls" required style={{ border: "1px dashed var(--dim)", padding: "12px", background: "var(--neutral-bg)", cursor: "pointer" }} />
         </label>
 
-        {/* The one primary action on the page, so it is the only filled
-            control. A page where everything is emphasised emphasises nothing. */}
         <button
           type="submit"
           disabled={busy}
           style={{
-            padding: "10px 16px",
-            cursor: "pointer",
-            background: "var(--text)",
+            padding: "12px 24px",
+            background: "var(--accent)",
             color: "var(--panel)",
-            border: "1px solid var(--text)",
-            borderRadius: 999,
-            fontWeight: 600,
+            border: "1px solid var(--accent)",
+            marginTop: 8,
             justifySelf: "start",
+            transition: "all 0.2s ease",
+            fontSize: 15,
           }}
         >
           {busy ? "Uploading…" : "Upload"}
@@ -157,44 +156,47 @@ export default function UploadPage() {
       )}
 
       {progress && (
-        <section style={{ borderTop: "1px solid #e7dcc9", paddingTop: "1rem" }}>
-          <p style={{ fontFamily: "monospace", fontSize: ".85rem" }}>
-            {progress.id} — <strong>{progress.status}</strong>
+        <section className="animate-in" style={{ borderTop: "1px solid var(--line)", paddingTop: "32px", animationDelay: "0s" }}>
+          <p style={{ fontFamily: "monospace", fontSize: 13, background: "var(--neutral-bg)", display: "inline-block", padding: "4px 8px", borderRadius: 6 }}>
+            {progress.id} — <strong style={{ color: progress.status === "failed" ? "var(--bad)" : "var(--text)" }}>{progress.status}</strong>
             {progress.resumed && " (resumed)"}
           </p>
 
           {/* Row counts, not a spinner. Minutes of silence is the failure mode. */}
-          <p style={{ fontSize: ".9rem" }}>
-            {progress.rows_extracted} / {progress.rows_total} rows &nbsp;·&nbsp;
+          <p style={{ fontSize: 15, marginTop: 16 }}>
+            <span style={{ fontWeight: 600 }}>{progress.rows_extracted} / {progress.rows_total}</span> rows extracted &nbsp;·&nbsp;
             batch {progress.batches_done} / {progress.batches_total}
-            {progress.batches_failed > 0 && ` · ${progress.batches_failed} failed`}
+            {progress.batches_failed > 0 && <span style={{ color: "var(--bad)", fontWeight: 600 }}>{` · ${progress.batches_failed} failed`}</span>}
           </p>
 
-          <div style={{ background: "var(--line)", height: 8, borderRadius: 4, overflow: "hidden" }}>
+          <div style={{ background: "var(--neutral-bg)", height: 12, borderRadius: 999, overflow: "hidden", marginTop: 12, boxShadow: "inset 0 1px 2px rgba(0,0,0,0.05)" }}>
             <div
               style={{
                 width: `${pct}%`,
                 height: "100%",
-                background: progress.batches_failed > 0 ? "var(--warn)" : "var(--good)",
-                transition: "width .3s",
+                background: progress.batches_failed > 0 
+                  ? "var(--warn)" 
+                  : "linear-gradient(90deg, #24824d, #34b568)",
+                transition: "width 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
+                borderRadius: 999,
               }}
             />
           </div>
 
           {progress.failures.length > 0 && (
-            <div style={{ marginTop: "1rem" }}>
-              <h2 style={{ fontSize: "1rem" }}>Batches that failed</h2>
-              <p style={{ fontSize: ".85rem", color: "var(--muted)" }}>
+            <div className="card" style={{ marginTop: "24px", padding: "20px 24px", borderColor: "var(--warn)", background: "var(--warn-bg)" }}>
+              <h2 style={{ fontSize: 16, margin: "0 0 8px" }}>Batches that failed</h2>
+              <p style={{ fontSize: 14, color: "var(--muted)", margin: "0 0 16px" }}>
                 These rows were not read. They appear in the catalogue as flagged
                 products, never as missing ones. Uploading the same file again
                 retries exactly these batches.
               </p>
-              <ul style={{ fontSize: ".85rem", fontFamily: "monospace" }}>
+              <ul style={{ fontSize: 13, fontFamily: "monospace", margin: 0, paddingLeft: 20 }}>
                 {progress.failures.map((f) => (
-                  <li key={f.batch_index}>
+                  <li key={f.batch_index} style={{ marginBottom: 12 }}>
                     batch {f.batch_index} — <strong>{f.reason_code}</strong>
                     <br />
-                    <span style={{ color: "var(--muted)" }}>{f.reason_human}</span>
+                    <span style={{ color: "var(--muted)", fontFamily: "sans-serif" }}>{f.reason_human}</span>
                   </li>
                 ))}
               </ul>
@@ -202,12 +204,13 @@ export default function UploadPage() {
           )}
 
           {progress.status === "complete" && progress.feed_url && (
-            <p style={{ marginTop: "1rem" }}>
-              <a href={progress.feed_url}>View the agent-readable feed →</a>
+            <p style={{ marginTop: "24px" }}>
+              <a href={progress.feed_url} style={{ fontWeight: 600 }}>View the agent-readable feed →</a>
             </p>
           )}
         </section>
       )}
+      </div>
     </main>
   );
 }

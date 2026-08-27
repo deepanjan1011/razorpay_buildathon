@@ -1,15 +1,5 @@
 /**
  * The shell. One theme, declared once.
- *
- * WHY THIS EXISTS AT ALL: nothing set a background or a colour, so every page
- * inherited the browser's preference. The upload page had been written against
- * a light background — `#555` labels, `#eee` progress bars — and rendered dark
- * text on dark, with its field labels effectively invisible. That is a contrast
- * failure rather than a taste one, and it was invisible to every test because
- * tests assert markup and not legibility.
- *
- * Tokens rather than per-page hex, so the next page cannot quietly disagree
- * with this one. Deliberately not a design system: six variables and a nav.
  */
 export const metadata = {
   title: "agentready",
@@ -17,77 +7,147 @@ export const metadata = {
 };
 
 const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
   :root {
-    --bg: #f7f0e4;
-    --panel: #fffcf7;
-    --line: #e7dcc9;
-    --text: #17140f;
-    --muted: #6e6559;
-    --dim: #988c7c;
-    --accent: #e1532a;
-    --good: #1b7a4c;
-    --bad: #b23a1f;
-    --warn: #8a6410;
-    /* Tints for status chips. Light backgrounds, not dark ones — a chip is a
-       label, not a panel, and it must read against the card it sits on. */
-    --good-bg: #e4efe4;
-    --bad-bg: #fbe4de;
-    --warn-bg: #f7ebd5;
-    --neutral-bg: #f2e9da;
+    /* Premium Light Mode Palette (No blue/purple) */
+    --bg: #f8f6f2; /* Soft warm light background */
+    --panel: #ffffff; /* Crisp white for cards/panels */
+    --line: #e8e3dc; /* Subtle warm borders */
+    
+    --text: #1a1815; /* Rich dark brown/black */
+    --muted: #736b5f; /* Elegant warm gray */
+    --dim: #a69e90;
+    
+    /* Warm/earthy semantic colors */
+    --accent: #eb5e28; /* Premium warm coral/orange */
+    --accent-hover: #d35222;
+    --good: #24824d; /* Forest green */
+    --bad: #d13a1e; /* Crisp crimson */
+    --warn: #a67c00; /* Deep amber */
+    
+    /* Subtle tints for statuses */
+    --good-bg: #eaf3ed;
+    --bad-bg: #fbedea;
+    --warn-bg: #fcf4e3;
+    --neutral-bg: #f2efe9;
   }
+  
   * { box-sizing: border-box; }
+  
   html, body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
-  a { color: var(--accent); }
+  
+  a { color: var(--accent); transition: color 0.2s ease; }
+  a:hover { color: var(--accent-hover); }
+  
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-  /* CARDS CARRY THE LAYOUT, not borders. On a cream ground a hairline plus a
-     very soft shadow separates a panel; a heavy border reads as a table. */
+  /* CARDS */
   .card {
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 14px;
-    box-shadow: 0 1px 2px rgba(23, 20, 15, .04);
+    border-radius: 16px;
+    box-shadow: 0 12px 32px -8px rgba(26, 24, 21, 0.08), 0 4px 12px -4px rgba(26, 24, 21, 0.04);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
   }
-  /* Small uppercase mono for field labels. Carries the hierarchy so the type
-     scale does not have to shout — the numbers stay the loud thing. */
+  
+  a.card:hover, button.card:hover, .card-interactive:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(26, 24, 21, 0.06), 0 4px 6px -2px rgba(26, 24, 21, 0.04);
+    border-color: rgba(235, 94, 40, 0.2);
+  }
+  
+  /* TYPOGRAPHY */
   .eyebrow {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
-    letter-spacing: .09em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--muted);
+    font-weight: 500;
   }
-  /* Form controls do not inherit colour, so they render as light-on-light
-     unless told otherwise — the other half of the same bug. */
+  
+  /* PILLS / GHOST BUTTONS */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 8px 16px;
+    border-radius: 999px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
+  .pill:hover {
+    border-color: rgba(235, 94, 40, 0.4);
+    color: var(--text);
+  }
+  .pill[data-active="true"] {
+    background: var(--text);
+    color: var(--panel);
+    border-color: var(--text);
+    font-weight: 600;
+  }
+
+  /* FORM CONTROLS */
   input, button, select {
     font: inherit;
     color: var(--text);
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 8px 10px;
+    border-radius: 8px;
+    padding: 10px 14px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
-  button { cursor: pointer; border-radius: 8px; }
+  
+  input:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(235, 94, 40, 0.1);
+  }
+  
+  button { 
+    cursor: pointer; 
+    border-radius: 999px; 
+    font-weight: 500;
+  }
   button:hover:not(:disabled) { border-color: var(--muted); }
-  button:disabled { opacity: .5; cursor: default; }
-  input[type="file"] { padding: 6px; }
-  label { color: var(--text); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  input[type="file"] { padding: 8px; }
+  label { color: var(--text); font-weight: 500; }
+  
+  /* ANIMATIONS */
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  .animate-in {
+    animation: slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
 `;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
-        {/* A plain child, not dangerouslySetInnerHTML. The string is a module
-            constant with no interpolation, so the two are equivalent here — but
-            one of them is a pattern a reviewer has to stop and verify, and the
-            other is not. */}
         <style>{css}</style>
       </head>
       <body>

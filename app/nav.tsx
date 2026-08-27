@@ -21,19 +21,19 @@ export type NavKey = (typeof NAV)[number][2];
 
 export default function Nav({ active }: { active: NavKey }) {
   return (
-    <div style={{ display: "flex", justifyContent: "center", padding: "20px 16px 8px" }}>
+    <div className="animate-in" style={{ display: "flex", justifyContent: "center", padding: "24px 16px 12px" }}>
       <nav
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 4,
-          background: "var(--panel)",
-          border: "1px solid var(--line)",
+          gap: 6,
+          background: "rgba(255, 255, 255, 0.75)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          border: "1px solid rgba(232, 227, 220, 0.8)",
           borderRadius: 999,
           padding: 8,
-          // Two shadows: a tight one for the edge, a wide soft one for lift.
-          // A single large blur reads as a smudge on a cream ground.
-          boxShadow: "0 1px 2px rgba(23,20,15,.05), 0 12px 28px -12px rgba(23,20,15,.18)",
+          boxShadow: "0 4px 6px -1px rgba(26, 24, 21, 0.05), 0 12px 28px -12px rgba(26, 24, 21, 0.15)",
         }}
       >
         {NAV.map(([href, label, key]) => {
@@ -44,13 +44,14 @@ export default function Nav({ active }: { active: NavKey }) {
               href={href}
               style={{
                 fontSize: 13,
-                fontWeight: on ? 650 : 500,
+                fontWeight: on ? 600 : 500,
                 textDecoration: "none",
                 color: on ? "var(--panel)" : "var(--muted)",
-                background: on ? "var(--accent)" : "transparent",
-                padding: "8px 16px",
+                background: on ? "var(--text)" : "transparent",
+                padding: "8px 18px",
                 borderRadius: 999,
                 whiteSpace: "nowrap",
+                transition: "all 0.2s ease",
               }}
             >
               {label}

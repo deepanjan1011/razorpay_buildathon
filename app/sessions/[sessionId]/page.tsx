@@ -44,13 +44,10 @@ const money = (minor: unknown) =>
   typeof minor === "number" ? `₹${(minor / 100).toFixed(2)}` : String(minor ?? "—");
 
 const OUTCOME_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
-  allowed: { bg: "#e4efe4", fg: "#1b7a4c", label: "ALLOWED" },
-  refused: { bg: "#fbe4de", fg: "#b23a1f", label: "REFUSED" },
-  error: { bg: "#f7ebd5", fg: "#8a6410", label: "ERROR" },
-  // `observed` is not a euphemism for allowed — a late authorisation against a
-  // session we refused is recorded as something we saw, not something we
-  // permitted, and the colour should not suggest otherwise.
-  observed: { bg: "#ede6da", fg: "#e1532a", label: "OBSERVED" },
+  allowed: { bg: "var(--good)", fg: "var(--panel)", label: "ALLOWED" },
+  refused: { bg: "var(--bad)", fg: "var(--panel)", label: "REFUSED" },
+  error: { bg: "var(--warn)", fg: "var(--panel)", label: "ERROR" },
+  observed: { bg: "var(--dim)", fg: "var(--panel)", label: "OBSERVED" },
 };
 
 function Peers({ evidence }: { evidence: Record<string, unknown> }) {
@@ -59,18 +56,18 @@ function Peers({ evidence }: { evidence: Record<string, unknown> }) {
   if (failed.length === 0 && passed.length === 0) return null;
 
   return (
-    <div style={{ marginTop: 10 }}>
-      <div style={{ fontSize: 11, color: "#6e6559", marginBottom: 6 }}>
+    <div style={{ marginTop: 16 }}>
+      <div className="eyebrow" style={{ marginBottom: 10, fontSize: 12, fontWeight: 700, letterSpacing: "0.05em" }}>
         MANDATE CHECKS
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
         {/* Failed first, because that is what the reader is looking for. */}
         {failed.map((f) => (
           <span
             key={f.check}
-            style={{ background: "#fbe4de", color: "#b23a1f", padding: "3px 9px", borderRadius: 4, fontSize: 12 }}
+            style={{ background: "var(--bad-bg)", color: "var(--bad)", padding: "6px 12px", borderRadius: 8, fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}
           >
-            ✕ {f.check}
+            <span style={{ fontSize: 16 }}>✕</span> {f.check}
           </span>
         ))}
         {/* AND THE PASSED SET, which is the half most audit views omit. In a
@@ -79,9 +76,9 @@ function Peers({ evidence }: { evidence: Record<string, unknown> }) {
         {passed.map((p) => (
           <span
             key={p}
-            style={{ background: "#eaf2ea", color: "#4a7a5c", padding: "3px 9px", borderRadius: 4, fontSize: 12 }}
+            style={{ background: "var(--good-bg)", color: "var(--good)", padding: "6px 12px", borderRadius: 8, fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}
           >
-            ✓ {p}
+            <span style={{ fontSize: 16 }}>✓</span> {p}
           </span>
         ))}
       </div>
@@ -94,13 +91,13 @@ function Drift({ evidence }: { evidence: Record<string, unknown> }) {
   if (drift.length === 0) return null;
 
   return (
-    <div style={{ marginTop: 10 }}>
-      <div style={{ fontSize: 11, color: "#6e6559", marginBottom: 6 }}>PRICE DRIFT</div>
+    <div style={{ marginTop: 12 }}>
+      <div className="eyebrow" style={{ marginBottom: 8 }}>PRICE DRIFT</div>
       {drift.map((d) => (
-        <div key={d.id} style={{ fontSize: 13, color: "#17140f" }}>
-          <code style={{ color: "#6e6559" }}>{d.id}</code>{" "}
-          the agent read <b style={{ color: "#8a6410" }}>{money(d.quoted_minor)}</b>, it is now{" "}
-          <b style={{ color: "#b23a1f" }}>{money(d.live_minor)}</b>
+        <div key={d.id} style={{ fontSize: 14, color: "var(--text)", background: "var(--panel)", padding: "8px 12px", border: "1px solid var(--line)", borderRadius: 8, display: "inline-block" }}>
+          <code style={{ color: "var(--muted)", fontWeight: 600 }}>{d.id}</code>{" "}
+          the agent read <b style={{ color: "var(--warn)" }}>{money(d.quoted_minor)}</b>, it is now{" "}
+          <b style={{ color: "var(--bad)" }}>{money(d.live_minor)}</b>
         </div>
       ))}
     </div>
@@ -113,34 +110,48 @@ function Event({ row }: { row: AuditRow }) {
 
   return (
     <li
-      className="card"
       style={{
         listStyle: "none",
-        marginBottom: 12,
-        // The outcome colour stays a left edge rather than a filled card: a
-        // refusal must be findable at a glance without the page turning red.
-        borderLeft: `3px solid ${style.fg}`,
-        padding: "14px 16px",
+        marginBottom: 32,
+        position: "relative",
+        paddingLeft: 40,
+        zIndex: 1,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ background: style.bg, color: style.fg, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+      <div 
+        style={{ 
+          position: "absolute", 
+          left: 3, 
+          top: 26, 
+          width: 14, 
+          height: 14, 
+          borderRadius: 999, 
+          background: style.bg, 
+          border: `3px solid var(--bg)`, 
+          zIndex: 2, 
+          boxShadow: `0 0 0 4px ${style.bg}20` 
+        }} 
+      />
+      <div className="card" style={{ padding: "24px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", borderBottom: "1px solid var(--line)", paddingBottom: 16, marginBottom: 16 }}>
+        <span style={{ background: style.bg, color: style.fg, padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase" }}>
           {style.label}
         </span>
-        <b style={{ fontSize: 15 }}>{row.action}</b>
-        <span style={{ fontSize: 12, color: "#6e6559" }}>by {row.actor}</span>
-        {row.session_status_at_event && (
-          // The status AS OBSERVED, which is what makes a late authorisation
-          // legible: "the session was canceled when this arrived".
-          <span style={{ fontSize: 12, color: "#6e6559" }}>
-            · session was <code>{row.session_status_at_event}</code>
-          </span>
-        )}
+        <b style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.02em" }}>{row.action}</b>
+        
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+          <span style={{ fontSize: 14, color: "var(--muted)", fontWeight: 500 }}>by <span style={{ color: "var(--text)", fontWeight: 700 }}>{row.actor}</span></span>
+          {row.session_status_at_event && (
+            <span style={{ fontSize: 14, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
+              · <span style={{ background: "var(--neutral-bg)", color: "var(--text)", padding: "4px 8px", borderRadius: 6, fontWeight: 600 }}>{row.session_status_at_event}</span>
+            </span>
+          )}
+        </div>
       </div>
 
       {row.reason_code && (
-        <div style={{ marginTop: 8 }}>
-          <code style={{ color: style.fg, fontSize: 13 }}>{row.reason_code}</code>
+        <div style={{ marginTop: 16 }}>
+          <code style={{ color: style.fg, fontSize: 15, background: style.bg, padding: "6px 10px", borderRadius: 6, fontWeight: 700 }}>{row.reason_code}</code>
           {/* SHOWN ONLY WHERE THE TILES DO NOT ALREADY SAY IT. Where both
               numbers render in rupees below, this sentence repeats them in
               paise — the same fact twice, in the harder units. The string is
@@ -150,7 +161,7 @@ function Event({ row }: { row: AuditRow }) {
             typeof evidence["cart_total_minor"] === "number" &&
             typeof evidence["mandate_ceiling_minor"] === "number"
           ) && (
-            <div style={{ fontSize: 14, color: "#17140f", marginTop: 3 }}>{row.reason_human}</div>
+            <div style={{ fontSize: 15, color: "var(--text)", marginTop: 8 }}>{row.reason_human}</div>
           )}
 
           {/* THE SAME TWO NUMBERS, IN RUPEES. The recorded string keeps minor
@@ -164,25 +175,25 @@ function Event({ row }: { row: AuditRow }) {
               <div
                 style={{
                   display: "flex",
-                  gap: 20,
-                  marginTop: 14,
+                  gap: 24,
+                  marginTop: 16,
                   alignItems: "center",
-                  background: "var(--bg)",
+                  background: "var(--panel)",
                   border: "1px solid var(--line)",
-                  borderRadius: 12,
-                  padding: "12px 16px",
+                  borderRadius: 16,
+                  padding: "16px 20px",
                 }}
               >
                 <div>
-                  <div className="eyebrow">Cart total</div>
-                  <div style={{ fontSize: 30, color: "#b23a1f", fontWeight: 700, letterSpacing: -0.5 }}>
+                  <div className="eyebrow" style={{ color: "var(--muted)" }}>Cart total</div>
+                  <div style={{ fontSize: 34, color: "var(--bad)", fontWeight: 800, letterSpacing: "-0.03em", marginTop: 4 }}>
                     {money(evidence["cart_total_minor"])}
                   </div>
                 </div>
-                <div style={{ fontSize: 20, color: "#988c7c" }}>&gt;</div>
+                <div style={{ fontSize: 24, color: "var(--dim)", fontWeight: 300 }}>&gt;</div>
                 <div>
-                  <div className="eyebrow">Mandate ceiling</div>
-                  <div style={{ fontSize: 30, color: "#17140f", fontWeight: 700, letterSpacing: -0.5 }}>
+                  <div className="eyebrow" style={{ color: "var(--muted)" }}>Mandate ceiling</div>
+                  <div style={{ fontSize: 34, color: "var(--text)", fontWeight: 800, letterSpacing: "-0.03em", marginTop: 4 }}>
                     {money(evidence["mandate_ceiling_minor"])}
                   </div>
                 </div>
@@ -198,11 +209,13 @@ function Event({ row }: { row: AuditRow }) {
           gate_version would be the wrong kind of tidying: rows written before
           and after a change to the check set must stay distinguishable, which
           is the whole reason it is stamped on every row. */}
-      <div style={{ marginTop: 10, fontSize: 11, color: "#988c7c" }}>
-        {when(row.ts)}
-        <span style={{ margin: "0 6px" }}>·</span>
-        policy <code>{row.gate_version}</code>
-        <span style={{ margin: "0 6px" }}>·</span>seq {row.seq}
+      <div style={{ marginTop: 24, fontSize: 13, color: "var(--muted)", fontWeight: 600, display: "flex", alignItems: "center", gap: 12, background: "var(--neutral-bg)", padding: "10px 14px", borderRadius: 8 }}>
+        <span style={{ color: "var(--text)" }}>{when(row.ts)}</span>
+        <span style={{ color: "var(--dim)" }}>|</span>
+        <span>policy <code style={{ color: "var(--text)", fontWeight: 700 }}>{row.gate_version}</code></span>
+        <span style={{ color: "var(--dim)" }}>|</span>
+        <span>seq <span style={{ color: "var(--text)", fontWeight: 700 }}>{row.seq}</span></span>
+      </div>
       </div>
     </li>
   );
@@ -218,25 +231,31 @@ export default async function SessionTimeline({
   const rows = await timeline(sql, sessionId);
 
   return (
-    <main style={{ background: "#f7f0e4", color: "#17140f", minHeight: "100vh", padding: "32px 24px", fontFamily: "ui-sans-serif, system-ui" }}>
+    <main style={{ padding: "32px 24px 64px" }}>
       <Nav active="sessions" />
-      <div style={{ maxWidth: 900, margin: "0 auto" }}>
+      <div className="animate-in" style={{ maxWidth: 900, margin: "0 auto", animationDelay: "0.1s", animationFillMode: "both" }}>
         {/* A real link, so it works on a page opened cold — from the overview
             card, a pasted URL, or a browser with no history to go back to.
             `history.back()` would do nothing in exactly those cases. */}
-        <a
-          href="/sessions"
-          style={{
-            display: "inline-block",
-            fontSize: 12,
-            fontWeight: 600,
-            textDecoration: "none",
-            color: "var(--muted)",
-            marginBottom: 14,
-          }}
-        >
-          ← All sessions
-        </a>
+        <div style={{ marginBottom: 24, marginTop: 16 }}>
+          <a
+            href="/sessions"
+            className="card"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 14,
+              fontWeight: 600,
+              textDecoration: "none",
+              color: "var(--text)",
+              padding: "8px 16px",
+              borderRadius: 999,
+            }}
+          >
+            ← All sessions
+          </a>
+        </div>
 
         <div className="eyebrow">
           <span style={{ color: "var(--accent)" }}>——</span> Audit trail
@@ -248,28 +267,29 @@ export default async function SessionTimeline({
         <h1
           style={{
             fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-            fontSize: 24,
-            margin: "8px 0 6px",
-            letterSpacing: -0.4,
-            fontWeight: 700,
+            fontSize: 28,
+            margin: "12px 0 8px",
+            letterSpacing: -0.5,
+            fontWeight: 800,
             wordBreak: "break-all",
           }}
         >
           {sessionId}
         </h1>
-        <p style={{ fontSize: 13, color: "#6e6559", margin: "0 0 4px" }}>
+        <p style={{ fontSize: 16, color: "var(--muted)", margin: "0 0 8px", lineHeight: 1.6 }}>
           Every decision, in the order it was written. Append-only — including events
           that arrived after the session was already terminal.
         </p>
 
         {rows.length === 0 ? (
-          <p style={{ color: "#6e6559" }}>
+          <p style={{ color: "var(--muted)", fontSize: 15, marginTop: 24 }}>
             No events for this session. Either it does not exist, or it belongs to another
             merchant — this page does not distinguish, for the same reason the API answers
             404 rather than 403.
           </p>
         ) : (
-          <ul style={{ padding: 0, marginTop: 24 }}>
+          <ul style={{ padding: 0, marginTop: 40, position: "relative" }}>
+            <div style={{ position: "absolute", top: 24, bottom: 0, left: 9, width: 2, background: "var(--line)", zIndex: 0 }} />
             {rows.map((row) => (
               <Event key={row.event_id} row={row} />
             ))}
