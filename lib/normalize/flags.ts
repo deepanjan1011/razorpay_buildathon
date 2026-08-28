@@ -1,4 +1,4 @@
-/** PHASE-1.md §1. Kept in one place so parse and normalize cannot drift apart. */
+/** PLAN.md §1. Kept in one place so parse and normalize cannot drift apart. */
 export type NormalizationFlag =
   | "PRICE_AMBIGUOUS"
   | "CATEGORY_UNMAPPED"
@@ -70,7 +70,7 @@ export const WITHHOLDING_FLAGS = new Set<NormalizationFlag>([
  * Withholding at feed time would be defence in the wrong layer: it costs
  * discovery and adds no protection the payment gate does not already give.
  *
- * PHASE-1.md §2 REQUIREMENT INHERITED BY PHASE 3: the mandate category check
+ * PLAN.md §2 REQUIREMENT INHERITED BY PHASE 3: the mandate category check
  * must treat `unmapped` as matching nothing. If that check is ever written as
  * "skip the category test when the product is unmapped", this tier becomes
  * unsafe and CATEGORY_UNMAPPED must move to WITHHOLDING_FLAGS.

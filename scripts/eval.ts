@@ -1,5 +1,5 @@
 /**
- * The normalization accuracy number. PHASE-1.md §5.
+ * The normalization accuracy number. PLAN.md §5.
  *
  *   npm run eval -- fixtures/real-<name>.xlsx
  *

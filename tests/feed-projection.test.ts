@@ -1,5 +1,5 @@
 /**
- * PHASE-1.md §1.1 and §6. Two things are proven here:
+ * PLAN.md §1.1 and §6. Two things are proven here:
  *
  * 1. What we emit validates against the vendored ACP schema — not against our
  *    own TypeScript types, which could drift, but against the pinned

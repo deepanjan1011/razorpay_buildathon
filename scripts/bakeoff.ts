@@ -5,7 +5,7 @@
  *
  * NOT the accuracy number. These labels are hand-written against SYNTHETIC
  * fixtures, so they measure which provider reads our own mess cases better —
- * a comparison, not a measurement. The number PHASE-1.md §5 asks for requires a
+ * a comparison, not a measurement. The number PLAN.md §5 asks for requires a
  * real merchant sheet and 50 hand-labelled products, and
  * docs/NORMALIZATION-EVAL.md stays empty until one exists. Do not let this
  * table migrate into that file.

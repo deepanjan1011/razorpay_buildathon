@@ -93,7 +93,7 @@ export type ACPFeedMetadata = {
 };
 
 /**
- * The offline full-replacement artifact pair. PHASE-1.md §6, and
+ * The offline full-replacement artifact pair. PLAN.md §6, and
  * rfc.product_feeds.md §3.4 — `products.jsonl` is one Product per line.
  */
 export function toProductsJsonl(products: ACPProduct[]): string {

@@ -76,7 +76,7 @@ constant. Where those never varied the *input*, this never varied the *host*.
    look like caution. (`CLAUDE.md`)
 2. **Tests derived from a rule cannot falsify the rule.** Every rule needs at
    least one end-to-end assertion against a fixture built from real-world shape.
-   (`CLAUDE.md`, `PHASE-1.md` §4)
+   (`CLAUDE.md`, `PLAN.md` §4)
 3. **A suite that runs in one environment says nothing about a second one.**
    Anything that ships to a different host — a bundler, a serverless runtime, a
    browser — needs at least one check *in that host*. `npm run build` and one
@@ -132,7 +132,7 @@ Stale examples; the dated spec files are authoritative.
 
 ## 2026-08-22 — DECISION 1: ACP feeds are agent-hosted push; we have no agent to push to
 
-**Mismatch.** `PHASE-1.md` §6 and §7 assume the merchant *serves* a feed
+**Mismatch.** `PLAN.md` §6 and §7 assume the merchant *serves* a feed
 (`/api/feed/[merchantId]`, "stable and cacheable", "versioned", plus a "merchant
 manifest"). The real spec inverts that. `rfc.product_feeds.md` §3.1 and §5: the
 Product Feed API is hosted by the **agent**; merchants call `POST /feeds` and
@@ -178,7 +178,7 @@ no edit. It is now a precisely-characterised deviation rather than a vague one.
 
 ## 2026-08-22 — DECISION 2: Phase 1 schema is flat; ACP feed is two-level
 
-**Mismatch.** `PHASE-1.md` §1 models one flat `Product` with a nullable
+**Mismatch.** `PLAN.md` §1 models one flat `Product` with a nullable
 `variant_group_id`. ACP requires `Product { id, variants[] }`, where `Variant`
 is the purchasable unit carrying price, availability, categories, media and
 options. `variant_group_id` inverts the spec's containment direction.
@@ -205,13 +205,13 @@ a flat row plus a group id — the restructure makes the hardest parse case
 easier, not harder. Option 2 does not avoid the work; the grouping logic and the
 dual-id scheme still have to exist, just later, in a projection layer, after
 tests have been written against the wrong shape. Cost of choosing now is one
-`PHASE-1.md` §1 edit before any code exists.
+`PLAN.md` §1 edit before any code exists.
 
 ---
 
 ## 2026-08-22 — DECISION 3: `brand`, `material`, `gender`, `inventory_count` have no legal home in the feed
 
-**Mismatch.** `PHASE-1.md` §1 carries `brand`, `inventory_count`, and a
+**Mismatch.** `PLAN.md` §1 carries `brand`, `inventory_count`, and a
 free-form `attributes: Record<string, string>` (colour, size, material, gender).
 Checking `schema.feed.json`:
 
@@ -263,7 +263,7 @@ data is a worse outcome than a thinner feed. `description.plain` is
 lossy-but-honest: the information stays agent-visible without lying about its
 structure.
 
-**Consequential rule.** `PHASE-1.md` §1 says the internal model is a superset
+**Consequential rule.** `PLAN.md` §1 says the internal model is a superset
 and to "never do a lossy transform on the way out". That now needs its
 companion: **the outbound feed projection is lossy by construction, and that is
 correct.** The no-lossy-transform rule governs the internal record, not the
@@ -283,7 +283,7 @@ uncommitted and unattributed.
 2. *Init later*, after Phase 1 code exists.
 
 **Chosen.** Option 1, with two amendments: `.gitignore` lands in the first
-commit (covering `CLAUDE.md`, `.env*`, `fixtures/real-*`), and `PHASE-1.md` is
+commit (covering `CLAUDE.md`, `.env*`, `fixtures/real-*`), and `PLAN.md` is
 corrected for Decisions 2 and 3 **before** committing.
 
 **Why.** Commit one should be the corrected design, not a wrong version that
@@ -393,7 +393,7 @@ plausible-looking wrong number is more dangerous than a crash, and a test suite
 written after the implementation would likely have asserted whatever the
 implementation happened to produce.
 
-**Generalised into two standing rules** in `CLAUDE.md` and `PHASE-1.md` §4:
+**Generalised into two standing rules** in `CLAUDE.md` and `PLAN.md` §4:
 
 - *Extract, do not subtract.* Removal-based cleaning leaves behind whatever you
   failed to anticipate. Match what you want instead. Subtraction fails silently;
@@ -466,7 +466,7 @@ parse failures, which is a much easier target and does not need tuning. Two
 independent checks that both have to fail is cheap insurance in the one path
 where being wrong costs real money.
 
-**Note.** `PRICE_OUT_OF_BAND` is a new `NormalizationFlag`; `PHASE-1.md` §1 was
+**Note.** `PRICE_OUT_OF_BAND` is a new `NormalizationFlag`; `PLAN.md` §1 was
 amended rather than overloading `PRICE_AMBIGUOUS`, because
 `CLAUDE.md` invariant 3 wants a distinct machine reason code per refusal.
 
@@ -564,11 +564,11 @@ match it. What caught it was running the pipeline end to end against a fixture
 built from real-world shapes — the plain-number price. A unit test written
 against my own assumption agreed with the assumption.
 
-**Generalised** into `CLAUDE.md` and `PHASE-1.md` §4: *tests derived from a rule
+**Generalised** into `CLAUDE.md` and `PLAN.md` §4: *tests derived from a rule
 cannot falsify the rule — every rule needs at least one end-to-end assertion
 against a fixture built from real-world shape, not from the rule.*
 
-**Root cause was in the docs, not just the code.** `PHASE-1.md` §1 said "nothing
+**Root cause was in the docs, not just the code.** `PLAN.md` §1 said "nothing
 with `needs_review: true` is served" and listed `CURRENCY_ASSUMED` as a flag a
 few lines later. The rule and the flag list were incoherent *together*, and each
 looked fine alone. Worth remembering when reviewing a spec: the contradiction

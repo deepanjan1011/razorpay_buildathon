@@ -1,5 +1,5 @@
 /**
- * Shared HTTP behaviour for the feed read surface. PHASE-1.md §6.
+ * Shared HTTP behaviour for the feed read surface. PLAN.md §6.
  *
  * TRANSPORT DEVIATION, restated because it is easy to forget when reading route
  * handlers: in ACP the Product Feed API is hosted by the AGENT, and
@@ -90,7 +90,7 @@ export function conformantJson(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "API-Version": ACP_API_VERSION,
-    // Stable and cacheable (PHASE-1.md §6). Short max-age with revalidation:
+    // Stable and cacheable (PLAN.md §6). Short max-age with revalidation:
     // feed price and availability are explicitly NOT guaranteed
     // (rfc.product_feeds.md §7) and checkout is authoritative, so a stale read
     // is safe — but a long TTL would make a price correction invisible for

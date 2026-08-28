@@ -77,7 +77,7 @@ export async function connect(connectionString?: string): Promise<Sql> {
   const url = connectionString ?? process.env["DATABASE_URL"];
   if (!url) {
     throw new Error(
-      "DATABASE_URL is not set. See docs/PHASE-1.md §7 for database setup.",
+      "DATABASE_URL is not set. See docs/PLAN.md §7 for database setup.",
     );
   }
 

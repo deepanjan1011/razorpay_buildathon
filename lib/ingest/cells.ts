@@ -1,5 +1,5 @@
 /**
- * Deterministic cell coercion. PHASE-1.md §4: anything a parser can do reliably
+ * Deterministic cell coercion. PLAN.md §4: anything a parser can do reliably
  * must not go through the model. Everything here is reliable; nothing here
  * infers meaning.
  *

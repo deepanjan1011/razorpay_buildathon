@@ -1,5 +1,5 @@
 /**
- * One test per PHASE-1.md §4 mess case. If a bullet in §4 has no `describe`
+ * One test per PLAN.md §4 mess case. If a bullet in §4 has no `describe`
  * here, the §8 gate is not met.
  *
  * Everything asserted here is DETERMINISTIC. Where a case needs semantics —

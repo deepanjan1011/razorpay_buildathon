@@ -1,5 +1,5 @@
 /**
- * PHASE-1.md §2. Fixed, small, deliberately coarse.
+ * PLAN.md §2. Fixed, small, deliberately coarse.
  *
  * The LLM maps *into* this list and cannot invent members. Mandate category
  * matching (DESIGN.md §3) runs against `Category` only — never `category_raw`,

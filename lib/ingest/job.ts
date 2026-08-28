@@ -1,5 +1,5 @@
 /**
- * Ingest job lifecycle: create, run, resume. PHASE-1.md §4a.
+ * Ingest job lifecycle: create, run, resume. PLAN.md §4a.
  *
  * EXACTLY-ONCE AT BATCH GRANULARITY, and precisely what that means here:
  *

@@ -2,7 +2,7 @@
  * Upload -> job -> feed, as one callable unit.
  *
  * WHY THE RUN IS FIRE-AND-FORGET. Extraction takes minutes on a real catalogue
- * (PHASE-1.md §4a: ~5.5 min for 500 rows under a 5 requests/minute cap), so the
+ * (PLAN.md §4a: ~5.5 min for 500 rows under a 5 requests/minute cap), so the
  * POST cannot wait for it. There is no queue and no worker process, which would
  * normally make "start it and return" a way to lose work.
  *

@@ -1,9 +1,9 @@
 /**
- * The internal normalized model. PHASE-1.md §1.
+ * The internal normalized model. PLAN.md §1.
  *
  * A superset of the ACP Product Feed Spec: it carries provenance, confidence
  * and merchant fields the feed has no slot for. The projection to ACP
- * (lib/feed/project.ts) is lossy by construction — see PHASE-1.md §1.1.
+ * (lib/feed/project.ts) is lossy by construction — see PLAN.md §1.1.
  */
 import type { NormalizationFlag } from "./flags.ts";
 import type { Category } from "./taxonomy.ts";
@@ -13,7 +13,7 @@ export type Money = { amount_minor: number; currency: "INR" };
 
 export type Availability = "in_stock" | "out_of_stock" | "unknown";
 
-/** PHASE-1.md §1 `source_row` is required — every variant traces back. */
+/** PLAN.md §1 `source_row` is required — every variant traces back. */
 export type Provenance = {
   source_file: string;
   source_sheet: string;

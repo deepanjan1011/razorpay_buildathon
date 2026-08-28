@@ -358,7 +358,7 @@ satisfy a category-constrained mandate, so it is refused at the payment gate by
 construction, and hiding it from discovery as well would cost catalogue coverage
 for no added safety. This requires the mandate category check to treat
 `unmapped` as matching nothing — if that ever changes, unmapped products must be
-withheld. See `docs/PHASE-1.md` §1 and §2.
+withheld. See `docs/PLAN.md` §1 and §2.
 
 ### Two clocks over one purchase — decide this before writing Phase 3
 

@@ -1,5 +1,5 @@
 /**
- * The merchant upload page. PHASE-1.md §7.
+ * The merchant upload page. PLAN.md §7.
  *
  * DELIBERATELY PLAIN. Its job is to get a real spreadsheet through the pipeline
  * and to make a multi-minute wait legible — not to be designed. The merchant
@@ -7,7 +7,7 @@
  * ahead of the phase for something nothing downstream depends on.
  *
  * What it must do well is the waiting. At ~1.5 rows/s a real catalogue is
- * minutes (PHASE-1.md §4a), and a merchant staring at a spinner cannot tell
+ * minutes (PLAN.md §4a), and a merchant staring at a spinner cannot tell
  * "working" from "hung" — so it shows row counts, batch counts, and every
  * failed batch with its reason code rather than a bare status.
  */

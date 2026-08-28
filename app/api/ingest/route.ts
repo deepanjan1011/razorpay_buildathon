@@ -2,7 +2,7 @@
  * POST /api/ingest — upload a spreadsheet, start or resume its job.
  *
  * Returns 202 and a job id, never the finished catalogue: extraction takes
- * minutes at real catalogue size (PHASE-1.md §4a). Poll
+ * minutes at real catalogue size (PLAN.md §4a). Poll
  * `GET /api/ingest/{jobId}`.
  *
  * IDEMPOTENT. The job id is derived from merchant + filename + row count, so a

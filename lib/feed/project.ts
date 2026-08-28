@@ -1,5 +1,5 @@
 /**
- * Internal normalized model -> ACP Product Feed. PHASE-1.md §1.1.
+ * Internal normalized model -> ACP Product Feed. PLAN.md §1.1.
  *
  * Two rules govern everything here:
  *

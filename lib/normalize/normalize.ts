@@ -1,5 +1,5 @@
 /**
- * Deterministic assembly. PHASE-1.md §3, stages four and five.
+ * Deterministic assembly. PLAN.md §3, stages four and five.
  *
  * Takes parsed rows plus the model's semantic reading and produces the internal
  * Product/Variant model. Every decision that touches money or stock is made
@@ -30,7 +30,7 @@ import { isCategory } from "./taxonomy.ts";
 
 /**
  * Below these, a row goes to a human instead of to buyers. Deliberately
- * generous — PHASE-1.md §2 says do not force-fit, and a false confident
+ * generous — PLAN.md §2 says do not force-fit, and a false confident
  * publish is worse than a review queue that is too long.
  */
 export const CATEGORY_CONFIDENCE_MIN = 0.7;
@@ -277,7 +277,7 @@ export function normalizeSheet(
     const extraction = byRow.get(row.row);
     if (extraction === undefined) {
       // The model returned nothing for this row. Do not skip it — an
-      // unexplained disappearance is exactly the silent drop PHASE-1.md §8
+      // unexplained disappearance is exactly the silent drop PLAN.md §8
       // forbids. Emit a fully flagged placeholder so it shows up in review.
       const provenance = provenanceFor(row, sheet, ctx);
       const key = `__unextracted_${row.row}`;

@@ -1,5 +1,5 @@
 /**
- * The feed read surface. PHASE-1.md §6.
+ * The feed read surface. PLAN.md §6.
  *
  * Route handlers are called directly as functions rather than through a dev
  * server: an App Router handler takes a Request and returns a Response, so a

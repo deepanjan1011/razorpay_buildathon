@@ -1,5 +1,5 @@
 /**
- * Workbook -> raw rows. PHASE-1.md §3, the first two pipeline stages.
+ * Workbook -> raw rows. PLAN.md §3, the first two pipeline stages.
  *
  * This layer finds structure and preserves values. It never interprets one: no
  * category is decided here, no title is decomposed, no price is chosen from a
@@ -13,7 +13,7 @@ export type SkipReason = "preamble" | "blank" | "junk";
 
 export type RawRow = {
   sheet: string;
-  /** 1-based sheet row. Provenance: PHASE-1.md §1 `source_row`. */
+  /** 1-based sheet row. Provenance: PLAN.md §1 `source_row`. */
   row: number;
   /** header -> raw trimmed value. Columns past the header get `col_N`. */
   cells: Record<string, string>;

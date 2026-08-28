@@ -3,7 +3,7 @@
  *
  * The model produces semantics only. It is never asked for a price, a stock
  * level, or a currency — those are deterministic (lib/ingest/cells.ts), and
- * PHASE-1.md §4 is explicit that anything a parser can do reliably must not go
+ * PLAN.md §4 is explicit that anything a parser can do reliably must not go
  * through the model. Keeping money out of the model's output is what makes
  * CLAUDE.md invariant 1 structural rather than aspirational: the model cannot
  * influence an amount it never emits.
@@ -109,7 +109,7 @@ const pairSchema = {
  * of an ambiguity.
  *
  * The `category` enum is what stops the model inventing taxonomy members —
- * PHASE-1.md §2. Under constrained decoding it is a token-level guarantee.
+ * PLAN.md §2. Under constrained decoding it is a token-level guarantee.
  */
 export const EXTRACTION_SCHEMA = {
   type: "object",

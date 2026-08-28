@@ -3,7 +3,7 @@
  *
  *   npm run label:init -- fixtures/real-lakshmi.xlsx
  *
- * PHASE-1.md §5 asks for fifty hand-labelled products. Hand-labelling from
+ * PLAN.md §5 asks for fifty hand-labelled products. Hand-labelling from
  * scratch means retyping every row before you can even start deciding what the
  * right answer is, which is most of the work and none of the judgement.
  *
@@ -36,7 +36,7 @@ if (!sheet) {
 
 const out = {
   $comment: [
-    "Hand labels for the normalization eval. PHASE-1.md §5.",
+    "Hand labels for the normalization eval. PLAN.md §5.",
     "Fill in the answer fields. Leave a field null to skip scoring it.",
     "title:    keywords that MUST appear (any one of them counts as correct)",
     "category: acceptable values — more than one may be genuinely right",
