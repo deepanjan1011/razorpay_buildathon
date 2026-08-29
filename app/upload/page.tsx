@@ -13,7 +13,6 @@
  */
 "use client";
 
-import Nav from "../nav.tsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Failure = { batch_index: number; reason_code: string; reason_human: string };
@@ -95,8 +94,7 @@ export default function UploadPage() {
       : 0;
 
   return (
-    <main style={{ maxWidth: 680, margin: "3rem auto", padding: "0 1.5rem 4rem" }}>
-      <Nav active="upload" />
+    <main style={{ maxWidth: 680, margin: "0 auto", padding: "8px 1.5rem 4rem" }}>
       <div className="animate-in" style={{ animationDelay: "0.1s", animationFillMode: "both" }}>
         <div className="eyebrow" style={{ marginTop: "24px" }}>
           <span style={{ color: "var(--accent)" }}>——</span> Ingest

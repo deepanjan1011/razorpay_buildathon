@@ -5,7 +5,6 @@
  * worth looking at is one click away, and building a second surface here would
  * be chrome competing with the artifact that actually answers the track bar.
  */
-import Nav from "../nav.tsx";
 import { TransitionLink } from "./navigation.tsx";
 import { connect } from "../../lib/db/sql.ts";
 
@@ -110,8 +109,7 @@ export default async function Sessions({
   const href = (f: FilterKey, l: number) => `/sessions?filter=${f}${l > PAGE ? `&limit=${l}` : ""}`;
 
   return (
-    <main style={{ padding: "32px 24px 64px" }}>
-      <Nav active="sessions" />
+    <main style={{ padding: "8px 24px 64px" }}>
       <div className="animate-in" style={{ maxWidth: 1040, margin: "0 auto", animationDelay: "0.1s", animationFillMode: "both" }}>
         <div className="eyebrow" style={{ marginTop: "24px" }}>
           <span style={{ color: "var(--accent)" }}>——</span> Sessions

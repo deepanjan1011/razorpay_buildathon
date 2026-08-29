@@ -1,6 +1,8 @@
 /**
  * The shell. One theme, declared once.
  */
+import Nav from "./nav.tsx";
+
 export const metadata = {
   title: "agentready",
   description: "Makes a spreadsheet merchant transactable by AI buyers.",
@@ -151,6 +153,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <style>{css}</style>
       </head>
       <body>
+        <Nav />
         {children}
       </body>
     </html>

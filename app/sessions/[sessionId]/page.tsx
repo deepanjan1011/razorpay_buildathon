@@ -11,7 +11,6 @@
  * that failed, the drift that caused it, and what was offered instead. Guessing
  * at that before seeing it run would have produced a page that renders rows.
  */
-import Nav from "../../nav.tsx";
 import { connect } from "../../../lib/db/sql.ts";
 import { timeline } from "../../../lib/audit/log.ts";
 import type { AuditRow } from "../../../lib/audit/log.ts";
@@ -231,8 +230,7 @@ export default async function SessionTimeline({
   const rows = await timeline(sql, sessionId);
 
   return (
-    <main style={{ padding: "32px 24px 64px" }}>
-      <Nav active="sessions" />
+    <main style={{ padding: "8px 24px 64px" }}>
       <div className="animate-in" style={{ maxWidth: 900, margin: "0 auto", animationDelay: "0.1s", animationFillMode: "both" }}>
         {/* A real link, so it works on a page opened cold — from the overview
             card, a pasted URL, or a browser with no history to go back to.

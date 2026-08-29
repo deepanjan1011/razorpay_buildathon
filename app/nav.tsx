@@ -1,16 +1,22 @@
 /**
  * The floating nav.
  *
- * A SERVER COMPONENT TAKING `active` AS A PROP, rather than a client component
- * calling `usePathname`. Two reasons, and the second is the real one:
+ * RENDERED ONCE, IN THE LAYOUT. It used to be placed by each page, taking an
+ * `active` prop — which meant five containers with four different top paddings,
+ * and on /upload a nav centred inside a 680px column rather than the page. The
+ * position drifted because nothing held it still. A layout holds it still by
+ * construction, and a new page cannot forget to include it.
  *
- *  - This repo's tsconfig is `nodenext`, and `next/navigation` type-resolves
- *    only under `bundler`. The import runs fine and fails `npm run typecheck`,
- *    which is the shape of bug this project keeps finding: works where you ran
- *    it, broken in the other environment.
- *  - A three-page site does not need client JavaScript to know which of three
- *    links is current. The page already knows; it can say so.
+ * A CLIENT COMPONENT AGAIN, because the layout cannot know which link is
+ * current and `usePathname` can. The import carries its extension —
+ * `next/navigation.js` — since this repo's `nodenext` resolution finds the
+ * declaration file beside it while the bundler finds the module; without it,
+ * typecheck fails on a page that runs perfectly.
  */
+"use client";
+
+import { usePathname } from "next/navigation.js";
+
 /** Ordered as the story runs: what it is, put a sheet in, what it became, what it decided. */
 const NAV = [
   ["/", "Overview", "overview"],
@@ -19,9 +25,9 @@ const NAV = [
   ["/sessions", "Audit trail", "sessions"],
 ] as const;
 
-export type NavKey = (typeof NAV)[number][2];
+export default function Nav() {
+  const path = usePathname();
 
-export default function Nav({ active }: { active: NavKey }) {
   return (
     <div className="animate-in" style={{ display: "flex", justifyContent: "center", padding: "24px 16px 12px" }}>
       <nav
@@ -39,7 +45,9 @@ export default function Nav({ active }: { active: NavKey }) {
         }}
       >
         {NAV.map(([href, label, key]) => {
-          const on = key === active;
+          // Exact match for "/", prefix for the rest — otherwise every route
+          // matches the root and the pill never leaves Overview.
+          const on = href === "/" ? path === "/" : path.startsWith(href);
           return (
             <a
               key={href}

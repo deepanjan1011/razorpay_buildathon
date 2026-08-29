@@ -7,7 +7,6 @@
  * surfaces that are real: a merchant uploading a spreadsheet, and the audit
  * trail behind a purchase.
  */
-import Nav from "./nav.tsx";
 import { connect } from "../lib/db/sql.ts";
 
 export const dynamic = "force-dynamic";
@@ -89,8 +88,7 @@ export default async function Home() {
   const [c, refusal] = await Promise.all([counts(), latestRefusal()]);
 
   return (
-    <main style={{ padding: "32px 24px 64px" }}>
-      <Nav active="overview" />
+    <main style={{ padding: "8px 24px 64px" }}>
       <div className="animate-in" style={{ maxWidth: 1040, margin: "0 auto", animationDelay: "0.1s", animationFillMode: "both" }}>
         <div className="eyebrow" style={{ marginTop: "40px" }}>
           <span style={{ color: "var(--accent)" }}>——</span> Overview

@@ -19,7 +19,6 @@
  * query for the other — two sources would drift, and a page claiming "11 of 15"
  * while the feed serves 12 is worse than no page.
  */
-import Nav from "../nav.tsx";
 import { connect } from "../../lib/db/sql.ts";
 import { assembleProducts } from "../../lib/ingest/job.ts";
 import { isWithholding } from "../../lib/normalize/flags.ts";
@@ -105,8 +104,7 @@ export default async function Catalogue() {
   const shelf = await latestShelf();
 
   return (
-    <main style={{ padding: "44px 24px" }}>
-      <Nav active="catalogue" />
+    <main style={{ padding: "8px 24px 64px" }}>
       <div style={{ maxWidth: 1040, margin: "0 auto" }}>
         <div className="eyebrow">
           <span style={{ color: "var(--accent)" }}>——</span> Catalogue
