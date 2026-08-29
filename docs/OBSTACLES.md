@@ -2978,3 +2978,77 @@ passed — a call shape nothing in this repo uses). The offered fix force-
 downgrades exceljs 4.4 → 3.4, a breaking change to the one library the ingest
 pipeline stands on. Accepted and written down; a silent `--force` here trades a
 theoretical bug for a real one.
+
+---
+
+## 2026-08-29 — Invariant 2 was false in production, and 32 green tests said otherwise
+
+**The defect.** `consume()` was imported by `lib/checkout/complete.ts` and never
+called. `mandate_consumption` was therefore never written, `isConsumed` always
+returned false, and `MANDATE_ALREADY_CONSUMED` could not fire outside a test.
+Mandates default to `single_use: true`, so **one mandate could pay for
+unlimited carts** — each up to its ceiling — until it expired.
+
+Proved before fixing, against the deployment: one single-use mandate, two
+different carts, two payment links, both `HTTP 200`. After the fix, the same
+script returns `403 MANDATE_ALREADY_CONSUMED` on the second.
+
+**Why the suite could not see it.** The gate has 32 tests enumerating every
+combination of peer checks, and they pass `consumed` in as an argument. They
+assert the RULE. Nothing asserted that a caller ever sets it. This is both of
+CLAUDE.md's warnings arriving at once — "an untested path is an assumption",
+and "tests derived from a rule cannot falsify the rule" — and the assumption
+was that the call site existed. It never did.
+
+Worth stating plainly: the store's own comment described exactly where to call
+it ("CALLED AFTER THE PAYMENT CALL SUCCEEDS, never before"), which reads like a
+completed decision. A comment describing the intended caller is not the caller.
+
+**The fix, and the retry it must not break.** Spending on any completion
+attempt would destroy a mandate on a transport failure that charged nobody, and
+invariant 4 requires that retry to succeed. So the consumption row carries the
+`session_id`, and the gate asks `consumedByOther` rather than `isConsumed`: the
+same session retrying is allowed through and reuses its existing link, while a
+different session is refused. Three tests drive the real caller against a real
+database, and were checked red with the call removed.
+
+### Found in the same audit
+
+- **A new `pg.Pool` on every request.** `connect()` built one per call, every
+  route calls it per request, and nothing ends them. Idle pools hold sockets
+  until Neon's connection cap does it for you. Now one pool per URL for the
+  life of the process, cached as the promise so concurrent first-callers cannot
+  race.
+- **`RAZORPAY_MIN_TTL_MINUTES` was exported and never read.** A mandate with
+  under 15 minutes left truncated the link below Razorpay's floor, Razorpay
+  rejected it, and the agent got a `502` naming the PSP for our arithmetic —
+  plus a spent idempotency key. Now an audited `MANDATE_EXPIRES_TOO_SOON`
+  refusal before any PSP call. This one also exposed a fixture that could not
+  fail: an existing test asserted a *ten-minute* mandate producing a truncated
+  link, which passed only because `fakeClient` does not enforce the floor the
+  real PSP does.
+- **The `INGEST_KEY` compare used `===`** while agent tokens, webhook
+  signatures and mandate signatures all use `timingSafeEqual`. Being the one
+  place that differs is how the odd one out survives review.
+
+### Verified clean, so the record says what was checked
+
+All 76 commits scanned for every value in `.env` plus the ingest key: clean. SQL
+fully parameterised — the one templated fragment is chosen from a fixed map
+behind an `isFilter` type guard. No `dangerouslySetInnerHTML`. Live probe of
+the deployment: `/api/checkout_sessions`, `/api/mandates` and an unowned
+session all `401`; unsigned webhook `401`; three path-traversal shapes `404`;
+no secret or stack trace in served HTML.
+
+### Not fixed, and why
+
+- **Idempotency records are keyed `(key, endpoint)`, not merchant.** Two
+  merchants sharing a key on the same endpoint collide — a replay of another
+  tenant's stored response, or a 409 that squats their key. Real, and it needs
+  a migration to the primary key; there is one merchant in this build, so it is
+  written down rather than shipped in the last hours before submission.
+- **`POST /api/ingest` still spends LLM quota anonymously.** The lock stops an
+  upload reaching the demo catalogue; it does not stop it costing API calls
+  against a 5/minute budget. Requiring `INGEST_KEY` for extraction would close
+  it and would also stop a judge trying the upload page, which is the more
+  valuable of the two.
