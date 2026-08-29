@@ -51,6 +51,7 @@ it, and **the four checks that passed beside the one that failed**.
 | **Mandates** | Signed authority: ceiling, category, item count, validity window, single-use |
 | **Audit** | Append-only log of every decision, with a machine reason code and a human string |
 | **MCP** | Three tools — discover, create session, complete |
+| **Dashboard** | Four pages: the transformation, the products held back with the reason and the sheet row, and every decision a checkout made |
 
 ### Normalization accuracy
 
@@ -215,6 +216,11 @@ lib/checkout    ACP sessions, totals, Razorpay links, webhooks
 lib/mandate     the gate, the signing seam, single-use consumption
 lib/audit       append-only decision log
 mcp/server.ts   three tools, speaking HTTP to this API like any other client
-app/sessions    the audit trail, rendered
+app/            four pages, in the order the story runs:
+                  /            what this is, over live counts and the last real refusal
+                  /upload      a sheet in, with row counts rather than a spinner
+                  /catalogue   what the sheet became — and every row held back, with why
+                  /sessions    the audit trail: the refusal, both numbers, the checks
+                               that passed beside the one that failed
 docs/OBSTACLES.md   what broke, what it cost, what found it
 ```
