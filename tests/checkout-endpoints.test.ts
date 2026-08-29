@@ -265,6 +265,32 @@ describe("idempotency", () => {
     assert.equal(results.filter((r) => r.kind === "conflict").length, 3);
   });
 
+  test("the same key from a DIFFERENT merchant is a different operation", async () => {
+    // The key was (key, endpoint) with merchant_id stored and ignored, so two
+    // merchants shared one namespace: the second got the first's stored
+    // response replayed — session id and totals included — or a 409 that let
+    // one squat the other's keys. An idempotency key is a client's private
+    // token for "the request I already sent"; two clients cannot mean the same
+    // thing by it. Reachable, not theoretical: this project's database holds
+    // live credentials for two merchants.
+    const mine = await withIdempotency(sql, req({ "Idempotency-Key": "same" }, { a: 1 }), "POST /x", MERCHANT, { a: 1 });
+    assert.equal(mine.kind, "proceed");
+    if (mine.kind === "proceed") await mine.commit(201, { id: "cs_mine", secret: "my totals" });
+
+    const theirs = await withIdempotency(
+      sql, req({ "Idempotency-Key": "same" }, { a: 1 }), "POST /x", "mer_someone_else", { a: 1 },
+    );
+    assert.equal(theirs.kind, "proceed", "another merchant's identical key must not replay my response");
+
+    // And the reverse direction: mine still replays as mine, not theirs.
+    const again = await withIdempotency(sql, req({ "Idempotency-Key": "same" }, { a: 1 }), "POST /x", MERCHANT, { a: 1 });
+    assert.equal(again.kind, "replay");
+    if (again.kind === "replay") {
+      const payload = (await again.response.json()) as { id: string };
+      assert.equal(payload.id, "cs_mine", "my key must replay my own stored response");
+    }
+  });
+
   test("the same key on a different endpoint is a different operation", async () => {
     const a = await withIdempotency(sql, req({ "Idempotency-Key": "shared" }, {}), "POST /a", MERCHANT, {});
     const b = await withIdempotency(sql, req({ "Idempotency-Key": "shared" }, {}), "POST /b", MERCHANT, {});

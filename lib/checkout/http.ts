@@ -145,6 +145,20 @@ export type Replay =
  * silently returning a session for a cart the caller did not ask for is worse
  * than an error.
  */
+/**
+ * SCOPED TO THE MERCHANT, in all three statements.
+ *
+ * The key was `(key, endpoint)` and `merchant_id` rode along unused, so two
+ * merchants shared one namespace: the same key with the same body replayed the
+ * other tenant's stored response, and with a different body returned a 409 that
+ * let one merchant squat another's keys. An idempotency key is a client's
+ * private token for "this is the request I already sent"; two clients cannot
+ * mean the same thing by it.
+ *
+ * The UPDATE needed it too, and is the easiest of the three to miss: scoping
+ * only the insert and the read would still let one merchant's commit overwrite
+ * the response body stored under another's row.
+ */
 export async function withIdempotency(
   sql: Sql,
   request: Request,
@@ -159,7 +173,7 @@ export async function withIdempotency(
     `insert into idempotency_record
        (key, endpoint, merchant_id, request_sha256, response_status, response_body)
      values ($1, $2, $3, $4, 0, '{}'::jsonb)
-     on conflict (key, endpoint) do nothing
+     on conflict (merchant_id, key, endpoint) do nothing
      returning key`,
     [key, endpoint, merchantId, hash],
   );
@@ -171,8 +185,8 @@ export async function withIdempotency(
         await sql.query(
           `update idempotency_record
               set response_status = $3, response_body = $4
-            where key = $1 and endpoint = $2`,
-          [key, endpoint, status, JSON.stringify(responseBody)],
+            where merchant_id = $5 and key = $1 and endpoint = $2`,
+          [key, endpoint, status, JSON.stringify(responseBody), merchantId],
         );
       },
     };
@@ -184,8 +198,9 @@ export async function withIdempotency(
     response_body: unknown;
   }>(
     `select request_sha256, response_status, response_body
-       from idempotency_record where key = $1 and endpoint = $2`,
-    [key, endpoint],
+       from idempotency_record
+      where merchant_id = $3 and key = $1 and endpoint = $2`,
+    [key, endpoint, merchantId],
   );
   const record = rows[0];
 
