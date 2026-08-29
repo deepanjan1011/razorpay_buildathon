@@ -55,6 +55,30 @@ export async function isConsumed(sql: Sql, mandateId: string): Promise<boolean> 
 }
 
 /**
+ * Spent — BY SOMETHING ELSE.
+ *
+ * This is the question the gate actually needs, and it is not `isConsumed`.
+ * A single-use mandate that paid for THIS session and is presented again by
+ * THIS session is a retry, and invariant 4 requires that retry to succeed:
+ * transport failures retry, refusals never do. Asking only "has it been spent"
+ * turns every dropped response into a permanently dead mandate.
+ *
+ * Presented by a DIFFERENT session, the same row is exactly the second spend
+ * single_use exists to refuse.
+ */
+export async function consumedByOther(
+  sql: Sql,
+  mandateId: string,
+  sessionId: string,
+): Promise<boolean> {
+  const { rows } = await sql.query<{ session_id: string }>(
+    "select session_id from mandate_consumption where mandate_id = $1 and session_id <> $2",
+    [mandateId, sessionId],
+  );
+  return rows.length > 0;
+}
+
+/**
  * Spend it. Returns false if it was ALREADY spent.
  *
  * `on conflict do nothing` plus `returning` makes this atomic: exactly one

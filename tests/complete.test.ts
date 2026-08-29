@@ -715,19 +715,51 @@ describe("two clocks — the mandate is the ceiling", () => {
     const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
     const client = fakeClient();
     const now = new Date("2026-08-23T10:00:00Z");
-    // Ten minutes of authority against a thirty-minute link.
-    const mandate = signMandate({ ...validMandate(), expires_at: "2026-08-23T10:10:00Z" });
+    // TWENTY minutes of authority against a thirty-minute link — above
+    // Razorpay's fifteen-minute floor, so a link can legally be created, and
+    // below our own TTL, so the mandate is still what truncates it. This read
+    // "ten minutes" and passed only because fakeClient does not enforce the
+    // floor: against the real PSP that case was always a 502, never the
+    // truncated link this asserts.
+    const mandate = signMandate({ ...validMandate(), expires_at: "2026-08-23T10:20:00Z" });
 
     await completeSession(
       sql, id, { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id }, mandate }, client, now,
     );
 
-    assert.equal(client.calls[0]?.expire_by, Math.floor(Date.parse("2026-08-23T10:10:00Z") / 1000));
+    assert.equal(client.calls[0]?.expire_by, Math.floor(Date.parse("2026-08-23T10:20:00Z") / 1000));
     const { rows } = await sql.query<{ link_expires_at: Date }>(
       "select link_expires_at from checkout_session where id = $1",
       [id],
     );
-    assert.equal(rows[0]?.link_expires_at.toISOString(), "2026-08-23T10:10:00.000Z");
+    assert.equal(rows[0]?.link_expires_at.toISOString(), "2026-08-23T10:20:00.000Z");
+  });
+
+  test("a mandate too near expiry is refused here, not by the PSP", async () => {
+    // Below Razorpay's fifteen-minute floor. The old behaviour truncated the
+    // link anyway, Razorpay rejected it, and the agent got a 502 naming the
+    // PSP for our arithmetic — plus a burnt idempotency key. RAZORPAY_MIN_TTL
+    // was exported for this and never read.
+    const id = (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+    const client = fakeClient();
+    const now = new Date("2026-08-23T10:00:00Z");
+    const mandate = signMandate({ ...validMandate(), expires_at: "2026-08-23T10:06:00Z" });
+
+    const outcome = await completeSession(
+      sql, id, { payment_data: { handler_id: RAZORPAY_LINK_HANDLER.id }, mandate }, client, now,
+    );
+
+    assert.ok(outcome && !outcome.ok);
+    assert.equal(outcome.code, "MANDATE_EXPIRES_TOO_SOON");
+    assert.equal(client.calls.length, 0, "no PSP call is made for a deadline it would reject");
+
+    // And it is on the record, with the numbers that explain it.
+    const { rows } = await sql.query<{ reason_code: string; evidence: Record<string, unknown> }>(
+      "select reason_code, evidence from audit_event where session_id = $1 and outcome = 'refused'",
+      [id],
+    );
+    assert.equal(rows[0]?.reason_code, "MANDATE_EXPIRES_TOO_SOON");
+    assert.equal(rows[0]?.evidence["minimum_link_ttl_minutes"], 15);
   });
 
   test("a mandate outliving the link leaves our thirty minutes alone", async () => {
@@ -925,5 +957,69 @@ describe("the alternatives pre-filter window", () => {
       outcome.alternatives?.some((a) => a.id === "var_tiny"),
       "the only affordable item was crowded out of the pre-filter window",
     );
+  });
+});
+
+describe("single_use is enforced by the caller, not only by the gate", () => {
+  /**
+   * THE GATE WAS ALWAYS RIGHT AND NOBODY SPENT THE MANDATE. `consume` was
+   * imported by complete.ts and never called, so `mandate_consumption` stayed
+   * empty, every single_use check read "not consumed", and one mandate could
+   * pay for unlimited carts until it expired.
+   *
+   * Thirty-two green gate tests did not catch it because they pass `consumed`
+   * IN as an argument — they assert the rule and can say nothing about whether
+   * a caller ever sets it. That is the shape CLAUDE.md warns about twice: an
+   * untested path is an assumption, and a rule's own tests cannot falsify it.
+   * These drive the real caller against a real database instead.
+   */
+  const start = async () =>
+    (await createSession(sql, MERCHANT, [{ id: "var_shoe", quantity: 1 }])).id;
+
+  test("a second session cannot spend the same single-use mandate", async () => {
+    const mandate = validMandate({ single_use: true });
+    const first = await completeSession(
+      sql,
+      await start(),
+      { ...payment, mandate },
+      fakeClient(),
+      new Date("2026-08-23T10:00:00Z"),
+    );
+    assert.ok(first?.ok, "the first purchase should succeed");
+
+    const second = await completeSession(
+      sql,
+      await start(),
+      { ...payment, mandate },
+      fakeClient(),
+      new Date("2026-08-23T10:01:00Z"),
+    );
+    assert.ok(second && !second.ok, "the second purchase must be refused");
+    assert.equal(second.code, "MANDATE_ALREADY_CONSUMED");
+  });
+
+  test("the SAME session may retry with the mandate it already spent", async () => {
+    // Invariant 4: a dropped response is retried, and that retry must work.
+    // Refusing it would protect nothing — the link already exists — while
+    // turning every network blip into a dead mandate.
+    const mandate = validMandate({ single_use: true });
+    const id = await start();
+    const client = fakeClient();
+
+    const first = await completeSession(sql, id, { ...payment, mandate }, client, new Date("2026-08-23T10:00:00Z"));
+    assert.ok(first?.ok);
+
+    const retry = await completeSession(sql, id, { ...payment, mandate }, client, new Date("2026-08-23T10:02:00Z"));
+    assert.ok(retry?.ok, "the same session retrying must still succeed");
+    assert.equal(retry.reused, true, "and must reuse the existing link, not make a second one");
+    assert.equal(client.calls.length, 1, "exactly one payment link for one cart");
+  });
+
+  test("a NON single-use mandate may be spent again", async () => {
+    // The refusal must come from the constraint, not from having been seen.
+    const mandate = validMandate({ single_use: false });
+    const a = await completeSession(sql, await start(), { ...payment, mandate }, fakeClient(), new Date("2026-08-23T10:00:00Z"));
+    const b = await completeSession(sql, await start(), { ...payment, mandate }, fakeClient(), new Date("2026-08-23T10:01:00Z"));
+    assert.ok(a?.ok && b?.ok, "single_use: false authorises more than one purchase");
   });
 });

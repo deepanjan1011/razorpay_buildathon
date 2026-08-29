@@ -19,10 +19,10 @@ import { RAZORPAY_LINK_HANDLER, priceCart } from "./session.ts";
 import type { RequestedItem } from "./session.ts";
 import { computeTotals, totalOf } from "./totals.ts";
 import type { PaymentLinkClient } from "./razorpay.ts";
-import { expiryFor } from "./razorpay.ts";
+import { expiryFor, RAZORPAY_MIN_TTL_MINUTES } from "./razorpay.ts";
 import { verifyMandate } from "../mandate/verify.ts";
 import { verifyMandateSignature } from "../mandate/sign.ts";
-import { consume, isConsumed } from "../mandate/store.ts";
+import { consume, consumedByOther } from "../mandate/store.ts";
 import type { Mandate } from "../mandate/schema.ts";
 import { record } from "../audit/log.ts";
 import { alternativesFor } from "../catalog/alternatives.ts";
@@ -198,11 +198,28 @@ type Row = StoredLink & {
  * So the mandate is the ceiling and the link is derived from it. One stored
  * instant still answers every read; this only decides which instant that is.
  */
-export function expiryForMandate(now: Date, mandate: Mandate | null): { at: Date; unix: number } {
+export function expiryForMandate(
+  now: Date,
+  mandate: Mandate | null,
+): { at: Date; unix: number; tooSoon?: true } {
   const base = expiryFor(now);
   if (!mandate) return base;
   const mandateEnd = Date.parse(mandate.expires_at);
   if (!Number.isFinite(mandateEnd) || mandateEnd >= base.at.getTime()) return base;
+
+  // BELOW RAZORPAY'S FLOOR, SAID OUT LOUD. Truncating the link to the mandate
+  // is right, but Razorpay refuses any `expire_by` less than 15 minutes out —
+  // so a mandate with 6 minutes left produced a 502 `payment_link_unavailable`
+  // and a burnt idempotency key, which blames the PSP for our own arithmetic.
+  // `RAZORPAY_MIN_TTL_MINUTES` was exported for exactly this and never read.
+  //
+  // Reported rather than clamped: clamping would issue a link outliving the
+  // authority to charge, which is the one direction DESIGN.md §3 refuses to go.
+  const minMs = RAZORPAY_MIN_TTL_MINUTES * 60_000;
+  if (mandateEnd - now.getTime() < minMs) {
+    return { at: new Date(mandateEnd), unix: Math.floor(mandateEnd / 1000), tooSoon: true };
+  }
+
   const at = new Date(mandateEnd);
   // Razorpay takes SECONDS, and flooring keeps their clock firing no later than
   // ours — the ordering the expiry grace in session.ts depends on.
@@ -268,7 +285,12 @@ export async function completeSession(
     ];
     const verdict = verifyMandate({
       mandate: request.mandate ?? null,
-      consumed: request.mandate ? await isConsumed(sql, request.mandate.mandate_id) : false,
+      // BY ANOTHER SESSION, not merely spent. This session presenting its own
+      // spent mandate again is a retry after a dropped response, and refusing
+      // that would break invariant 4 while protecting nothing.
+      consumed: request.mandate
+        ? await consumedByOther(sql, request.mandate.mandate_id, sessionId)
+        : false,
       signatureValid: request.mandate ? verifyMandateSignature(request.mandate) : false,
       cart: {
         total_minor: total,
@@ -468,6 +490,43 @@ export async function completeSession(
   // remains exactly one stored instant a read can answer from.
   const expiry = expiryForMandate(now, request.mandate ?? null);
 
+  // TOO LATE TO PRICE A LINK. Refused here, before the Razorpay call, because
+  // the alternative is a 502 that names the PSP for a deadline we computed. A
+  // refusal an agent can read beats an error it can only retry into — and this
+  // one is not retryable: the mandate expires on its own schedule and waiting
+  // makes it worse, so saying so is the whole service.
+  if (expiry.tooSoon && plan.action === "create") {
+    const message =
+      `The mandate expires at ${request.mandate!.expires_at}, less than ` +
+      `${RAZORPAY_MIN_TTL_MINUTES} minutes away — too soon to create a payment link a ` +
+      `human could pay in time. Issue a mandate with a longer validity window.`;
+    await record(sql, {
+      session_id: sessionId,
+      mandate_id: request.mandate?.mandate_id ?? null,
+      actor: "system",
+      action: "payment.link.refused",
+      outcome: "refused",
+      session_status_at_event: row.status,
+      reason_code: "MANDATE_EXPIRES_TOO_SOON",
+      reason_human: message,
+      evidence: {
+        mandate_expires_at: request.mandate?.expires_at ?? null,
+        minimum_link_ttl_minutes: RAZORPAY_MIN_TTL_MINUTES,
+        minutes_remaining: Math.max(
+          0,
+          Math.round((Date.parse(request.mandate!.expires_at) - now.getTime()) / 60_000),
+        ),
+      },
+    });
+    return {
+      ok: false,
+      status: 409,
+      code: "MANDATE_EXPIRES_TOO_SOON",
+      message,
+      session: { id: sessionId, ...session, status: row.status },
+    };
+  }
+
   let linkId: string;
   let linkUrl: string;
   let expiresAt: Date;
@@ -527,6 +586,43 @@ export async function completeSession(
         where id = $1`,
       [sessionId, linkId, linkUrl, total, expiresAt],
     );
+
+    // SPEND THE MANDATE. This call was missing entirely: `consume` was imported
+    // and never invoked, so `mandate_consumption` was never written, every
+    // `single_use` check read "not consumed", and one mandate could pay for
+    // unlimited carts until it expired. Invariant 2 said otherwise and the
+    // suite agreed with it — the gate's tests pass `consumed` in as an
+    // argument, so all thirty-two combinations were green while nothing in
+    // production ever set it. An untested path is an assumption, and this one
+    // was the assumption that the caller existed.
+    //
+    // HERE, and not earlier: after `client.create` returned a link. Consuming
+    // before the call would destroy a mandate on a transport failure that
+    // charged nobody, and invariant 4 requires that retry to work. The record
+    // carries the session id so the retry is distinguishable from a second
+    // spend — `consumedByOther` is what the gate asks.
+    if (request.mandate?.constraints.single_use) {
+      const spent = await consume(sql, request.mandate.mandate_id, sessionId);
+      await record(sql, {
+        session_id: sessionId,
+        mandate_id: request.mandate.mandate_id,
+        actor: "system",
+        action: "mandate.consumed",
+        // `observed` rather than `allowed`: this records a mandate being spent,
+        // which is a consequence of the decision above, not a second decision.
+        outcome: "observed",
+        session_status_at_event: row.status,
+        reason_code: null,
+        reason_human: null,
+        evidence: {
+          // False means another session got there first between the gate and
+          // here. The link exists either way — refusing to record that would
+          // hide a real double-spend rather than prevent one.
+          first_spend: spent,
+          payment_link_id: linkId,
+        },
+      });
+    }
   }
 
   const withMessage: Omit<CheckoutSession, "id"> = {

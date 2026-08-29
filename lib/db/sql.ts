@@ -73,7 +73,36 @@ function fromClient(client: {
  * same connection as the statements that follow it — so a transaction checks a
  * client out of the pool and holds it.
  */
+/**
+ * ONE POOL PER URL, FOR THE LIFE OF THE PROCESS.
+ *
+ * `connect()` is called by every route on every request, and it used to build a
+ * fresh `pg.Pool` each time — pools nobody ever ends. A pool is not a
+ * connection object to be created casually: each one opens its own sockets and
+ * holds them, so under any concurrency this walks straight into Neon's
+ * connection cap while most of those connections sit idle in pools no code can
+ * reach any more. It looked fine on a laptop serving one request at a time.
+ *
+ * Keyed by URL so a caller passing an explicit connection string still gets its
+ * own pool, and so tests that reach for a different database are unaffected.
+ */
+const pools = new Map<string, Promise<Sql>>();
+
 export async function connect(connectionString?: string): Promise<Sql> {
+  const url = connectionString ?? process.env["DATABASE_URL"];
+  if (url) {
+    const existing = pools.get(url);
+    if (existing) return existing;
+    const created = build(url);
+    // Cached as the PROMISE, not the resolved value: two requests arriving
+    // together must not each start building a pool and race to overwrite it.
+    pools.set(url, created);
+    return created;
+  }
+  return build(url as unknown as string);
+}
+
+async function build(connectionString?: string): Promise<Sql> {
   const url = connectionString ?? process.env["DATABASE_URL"];
   if (!url) {
     throw new Error(

@@ -13,6 +13,7 @@
 import { connect } from "../../../lib/db/sql.ts";
 import { ingestUpload } from "../../../lib/ingest/pipeline.ts";
 import { errorResponse } from "../../../lib/feed/http.ts";
+import { timingSafeEqual } from "node:crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -38,13 +39,27 @@ const MAX_BYTES = 10 * 1024 * 1024;
  * carrying it may name its own merchant, which is how the real catalogue gets
  * seeded. Unset means nobody can, including the owner — the safe direction.
  */
+const presented = (request: Request) => request.headers.get("x-ingest-key");
+
+function equal(a: string, b: string): boolean {
+  const x = Buffer.from(a, "utf8");
+  const y = Buffer.from(b, "utf8");
+  // Lengths differ: not equal, and not comparable in constant time either.
+  if (x.length !== y.length) return false;
+  return timingSafeEqual(x, y);
+}
+
 export function merchantFor(request: Request, submitted: string): string {
   // READ PER REQUEST, not once at import. A value captured at module load is a
   // value a test cannot vary and a rotated key cannot change — the same reason
   // the MCP server reads its token per call rather than at startup.
   if (process.env.NODE_ENV !== "production") return submitted;
   const key = process.env["INGEST_KEY"];
-  if (key && request.headers.get("x-ingest-key") === key) return submitted;
+  // Constant-time, like every other secret comparison in this repo (agent
+  // tokens, webhook signatures, mandate signatures). `===` on a secret leaks
+  // the length of the matching prefix through timing, and being the one place
+  // that does it differently is how the odd one out stays odd.
+  if (key && presented(request) !== null && equal(presented(request)!, key)) return submitted;
   return process.env["INGEST_SANDBOX_MERCHANT"] ?? "mer_try";
 }
 
