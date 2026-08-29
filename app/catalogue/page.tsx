@@ -214,7 +214,17 @@ export default async function Catalogue() {
             <div className="eyebrow" style={{ marginBottom: 10 }}>
               In the feed
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+            {/* GRID, NOT FLEX-WRAP. Flex items grow into the leftover space, so
+                a final row holding one card stretches it across the full width
+                and the page reads as broken rather than as 13 products. A grid
+                track keeps the last card the size of every other card. */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(212px, 1fr))",
+                gap: 12,
+              }}
+            >
               {/* KEYED BY ID *AND* SOURCE ROW. Variant ids are content hashes, so
                   two identical rows in one sheet — a duplicate a merchant
                   genuinely typed twice — produce the same id by design. The
@@ -224,7 +234,7 @@ export default async function Catalogue() {
                 <div
                   key={`${v.id}-${v.provenance.source_row}`}
                   className="card"
-                  style={{ padding: "14px 16px", flex: "1 1 232px", minWidth: 0 }}
+                  style={{ padding: "14px 16px", minWidth: 0 }}
                 >
                   <div style={{ fontSize: 14, fontWeight: 650, marginBottom: 4 }}>{v.title}</div>
                   <div style={{ fontSize: 19, fontWeight: 750, letterSpacing: -0.4 }}>
