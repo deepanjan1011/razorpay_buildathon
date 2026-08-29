@@ -371,7 +371,19 @@ export async function completeSession(
               if (!line || r.quoted_minor === undefined) return null;
               const live = line.variant.price_minor;
               if (live === r.quoted_minor) return null;
-              return { id: r.id, quoted_minor: r.quoted_minor, live_minor: live };
+              // THE TITLE AS IT WAS AT REFUSAL TIME, recorded rather than
+              // looked up later. `var_55c6777cef1151de` names the item to a
+              // machine and to nobody else, and the page had no way to do
+              // better. Resolving the id against the catalogue at render time
+              // would be worse than the id: prices and names move — that is
+              // what this row exists to report — so a later lookup can caption
+              // a refusal with a name the refusal never saw.
+              return {
+                id: r.id,
+                title: line.variant.title,
+                quoted_minor: r.quoted_minor,
+                live_minor: live,
+              };
             })
             .filter((d) => d !== null),
           peers_evaluated: verdict.peers_evaluated,

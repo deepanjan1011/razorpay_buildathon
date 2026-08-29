@@ -133,7 +133,13 @@ function Alternatives({ evidence }: { evidence: Record<string, unknown> }) {
 }
 
 function Drift({ evidence }: { evidence: Record<string, unknown> }) {
-  const drift = (evidence["drift"] ?? []) as Array<{ id: string; quoted_minor: number; live_minor: number }>;
+  const drift = (evidence["drift"] ?? []) as Array<{
+    id: string;
+    /** Absent on rows written before the title was recorded. */
+    title?: string;
+    quoted_minor: number;
+    live_minor: number;
+  }>;
   if (drift.length === 0) return null;
 
   return (
@@ -141,8 +147,15 @@ function Drift({ evidence }: { evidence: Record<string, unknown> }) {
       <div className="eyebrow" style={{ marginBottom: 8 }}>PRICE DRIFT</div>
       {drift.map((d) => (
         <div key={d.id} style={{ fontSize: 14, color: "var(--text)", background: "var(--panel)", padding: "8px 12px", border: "1px solid var(--line)", borderRadius: 8, display: "inline-block" }}>
-          <code style={{ color: "var(--muted)", fontWeight: 600 }}>{d.id}</code>{" "}
-          the agent read <b style={{ color: "var(--warn)" }}>{money(d.quoted_minor)}</b>, it is now{" "}
+          {/* The name if the row carries one, the id if it does not. Older
+              rows predate the title being recorded, and showing a stale id is
+              honest where inventing a name would not be. */}
+          {d.title ? (
+            <b style={{ fontWeight: 700 }}>{d.title}</b>
+          ) : (
+            <code style={{ color: "var(--muted)", fontWeight: 600 }}>{d.id}</code>
+          )}{" "}
+          — the agent read <b style={{ color: "var(--warn)" }}>{money(d.quoted_minor)}</b>, it is now{" "}
           <b style={{ color: "var(--bad)" }}>{money(d.live_minor)}</b>
         </div>
       ))}
