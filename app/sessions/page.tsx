@@ -17,6 +17,9 @@ type Row = {
   events: number;
   refusals: number;
   last_reason: string | null;
+  /** First line item's name, from the priced snapshot. Null on an empty cart. */
+  item: string | null;
+  item_count: number | null;
 };
 
 /**
@@ -88,6 +91,8 @@ export default async function Sessions({
   // refusals behind it is more interesting than one that simply completed.
   const { rows } = await sql.query<Row>(
     `select s.id, s.status, s.updated_at,
+            s.snapshot->'line_items'->0->>'name'                           as item,
+            jsonb_array_length(s.snapshot->'line_items')                   as item_count,
             count(a.event_id)::int                                        as events,
             count(a.event_id) filter (where a.outcome = 'refused')::int   as refusals,
             (select a2.reason_code from audit_event a2
@@ -95,7 +100,7 @@ export default async function Sessions({
               order by a2.seq desc limit 1)                               as last_reason
        from checkout_session s
        left join audit_event a on a.session_id = s.id
-      group by s.id, s.status, s.updated_at
+      group by s.id, s.status, s.updated_at, s.snapshot
       ${FILTERS[filter].having}
       order by s.updated_at desc
       limit $1`,
@@ -155,7 +160,7 @@ export default async function Sessions({
               className="eyebrow"
               style={{ display: "flex", gap: 16, padding: "16px 20px 12px", borderBottom: "1px solid var(--line)" }}
             >
-              <span style={{ flex: "0 1 250px" }}>Session</span>
+              <span style={{ flex: "0 1 250px" }}>Cart</span>
               <span style={{ flex: "0 0 170px" }}>Status</span>
               <span style={{ flex: 1 }}>Outcome</span>
               <span style={{ flex: "0 0 62px", textAlign: "right" }}>Events</span>
@@ -171,7 +176,29 @@ export default async function Sessions({
                   borderBottom: "1px solid var(--line)", textDecoration: "none", color: "inherit",
                 }}
               >
-                <code style={{ fontSize: 14, color: "var(--text)", flex: "0 1 250px", fontWeight: 500 }}>{r.id}</code>
+                {/* WHAT WAS IN THE CART LEADS. A 26-character opaque id told a
+                    reader nothing and told every row the same nothing — forty
+                    of them differ only in hash. The product and the total
+                    distinguish rows at a glance; the id stays underneath,
+                    because it is what the demo transcript and the server log
+                    print and the only thing anyone actually matches on. */}
+                <span style={{ flex: "0 1 250px", minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {r.item ?? "empty cart"}
+                    {r.item_count && r.item_count > 1 ? (
+                      <span style={{ color: "var(--muted)", fontWeight: 500 }}> +{r.item_count - 1}</span>
+                    ) : null}
+                    {/* NO TOTAL HERE, deliberately. The snapshot's total is the
+                        CURRENT price, and a refused row is refused precisely
+                        because the price moved — so the list would print
+                        "Mini Murukku ₹112.35 — refused, ceiling ₹112.35" and
+                        invite the exact wrong conclusion. The total that
+                        explains a refusal is the one recorded at refusal time,
+                        and it is on the session page where its ceiling is
+                        beside it. */}
+                  </div>
+                  <code style={{ fontSize: 11, color: "var(--dim)" }}>{r.id}</code>
+                </span>
                 {/* A chip, not coloured text: status is a category, and a bare
                     coral word reads as an alarm on a row that is merely waiting. */}
                 <span style={{ flex: "0 0 170px" }}>
