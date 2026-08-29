@@ -47,12 +47,22 @@ type Shelf = {
 async function latestShelf(): Promise<Shelf | null> {
   try {
     const sql = await connect();
+    // PINNED WHERE IT MATTERS. "The most recent completed ingest" is the right
+    // answer on a laptop, where the last upload is yours. On a public URL it is
+    // whatever a stranger uploaded last — and since the ingest lock lands every
+    // anonymous upload on the sandbox merchant, the page would show a visitor's
+    // spreadsheet while the audit trail described a different shop entirely.
+    // CATALOGUE_MERCHANT names the shop this deployment is about; unset keeps
+    // the local behaviour, where following your own last upload is the point.
+    const pinned = process.env["CATALOGUE_MERCHANT"];
     const { rows } = await sql.query<{ id: string; merchant_id: string; source_file: string }>(
       `select id, merchant_id, source_file
          from ingest_job
         where status = 'complete'
+          and ($1::text is null or merchant_id = $1)
         order by created_at desc
         limit 1`,
+      [pinned ?? null],
     );
     const job = rows[0];
     if (!job) return null;
