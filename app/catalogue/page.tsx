@@ -54,7 +54,10 @@ async function latestShelf(): Promise<Shelf | null> {
     // spreadsheet while the audit trail described a different shop entirely.
     // CATALOGUE_MERCHANT names the shop this deployment is about; unset keeps
     // the local behaviour, where following your own last upload is the point.
-    const pinned = process.env["CATALOGUE_MERCHANT"];
+    // Trimmed, and quotes stripped: an env var pasted into a hosting UI arrives
+    // as `"mer_live"` or with a trailing space often enough that treating it
+    // literally turns a typo into an empty page with a misleading message.
+    const pinned = process.env["CATALOGUE_MERCHANT"]?.trim().replace(/^["']|["']$/g, "") || null;
     const { rows } = await sql.query<{ id: string; merchant_id: string; source_file: string }>(
       `select id, merchant_id, source_file
          from ingest_job
@@ -112,6 +115,8 @@ function Stat({ n, label, sub, tone }: { n: number; label: string; sub: string; 
 
 export default async function Catalogue() {
   const shelf = await latestShelf();
+  const pinnedMerchant =
+    process.env["CATALOGUE_MERCHANT"]?.trim().replace(/^["']|["']$/g, "") || null;
 
   return (
     <main style={{ padding: "8px 24px 64px" }}>
@@ -125,8 +130,23 @@ export default async function Catalogue() {
 
         {shelf === null ? (
           <p style={{ fontSize: 14, color: "var(--muted)" }}>
-            No completed ingest yet. Upload a sheet on <a href="/upload">Upload</a>, or run{" "}
-            <code>npm run demo</code>.
+            {pinnedMerchant ? (
+              <>
+                {/* NAMES THE PIN. An empty page that says "nothing uploaded yet"
+                    when a merchant IS pinned sends the reader to upload a sheet
+                    they already uploaded — the message describes the wrong
+                    cause. Misconfiguration and genuine emptiness look identical
+                    otherwise. */}
+                No completed ingest for <code>{pinnedMerchant}</code>. Either nothing has been
+                ingested for that merchant, or <code>CATALOGUE_MERCHANT</code> names one that
+                does not exist.
+              </>
+            ) : (
+              <>
+                No completed ingest yet. Upload a sheet on <a href="/upload">Upload</a>, or run{" "}
+                <code>npm run demo</code>.
+              </>
+            )}
           </p>
         ) : (
           <>
