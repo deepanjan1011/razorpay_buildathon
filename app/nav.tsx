@@ -11,9 +11,11 @@
  *  - A three-page site does not need client JavaScript to know which of three
  *    links is current. The page already knows; it can say so.
  */
+/** Ordered as the story runs: what it is, put a sheet in, what it became, what it decided. */
 const NAV = [
   ["/", "Overview", "overview"],
   ["/upload", "Upload", "upload"],
+  ["/catalogue", "Catalogue", "catalogue"],
   ["/sessions", "Audit trail", "sessions"],
 ] as const;
 
