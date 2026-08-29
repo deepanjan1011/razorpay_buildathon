@@ -323,6 +323,23 @@ export type Handled = {
  * audit rows — the fields written here are already §4's field names, so that
  * migration is a copy, not a redesign.
  */
+/**
+ * The tenant these dedupe rows belong to.
+ *
+ * `idempotency_record` is keyed per merchant now, and webhook events are not a
+ * merchant's requests — they are Razorpay's, about one of our sessions. This
+ * column previously held `event.session_id`, which made the row's "merchant"
+ * a session id, and would have turned dedupe into "per event id AND session"
+ * the moment the key gained that column: the same event arriving twice with a
+ * different session id would have been processed twice, on the money path.
+ *
+ * A constant keeps dedupe exactly where it was — one row per event id — and
+ * stops the column claiming something untrue. The session id is not lost; it
+ * is on the decision written into `response_body`, where it describes the
+ * event rather than pretending to own it.
+ */
+const WEBHOOK_TENANT = "razorpay";
+
 export async function handleEvent(
   sql: Sql,
   event: LinkEvent,
@@ -332,16 +349,16 @@ export async function handleEvent(
     `insert into idempotency_record
        (key, endpoint, merchant_id, request_sha256, response_status, response_body)
      values ($1, 'razorpay_webhook', $2, $3, 0, '{}'::jsonb)
-     on conflict (key, endpoint) do nothing
+     on conflict (merchant_id, key, endpoint) do nothing
      returning key`,
-    [event.event_id, event.session_id ?? "unknown", event.event],
+    [event.event_id, WEBHOOK_TENANT, event.event],
   );
 
   if (claimed.length === 0) {
     const { rows } = await sql.query<{ response_body: Decision }>(
       `select response_body from idempotency_record
-        where key = $1 and endpoint = 'razorpay_webhook'`,
-      [event.event_id],
+        where merchant_id = $2 and key = $1 and endpoint = 'razorpay_webhook'`,
+      [event.event_id, WEBHOOK_TENANT],
     );
     return {
       duplicate: true,
@@ -412,8 +429,12 @@ export async function handleEvent(
   await sql.query(
     `update idempotency_record
         set response_status = 200, response_body = $2
-      where key = $1 and endpoint = 'razorpay_webhook'`,
-    [event.event_id, JSON.stringify({ ...decision, session_status_at_event: facts?.status ?? null })],
+      where merchant_id = $3 and key = $1 and endpoint = 'razorpay_webhook'`,
+    [
+      event.event_id,
+      JSON.stringify({ ...decision, session_status_at_event: facts?.status ?? null }),
+      WEBHOOK_TENANT,
+    ],
   );
 
   return { duplicate: false, decision };
