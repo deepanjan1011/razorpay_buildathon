@@ -282,6 +282,60 @@ export async function completeSession(
     });
 
     if (!verdict.ok) {
+      // AN IN-MANDATE ALTERNATIVE, WHERE ONE EXISTS. DESIGN.md §5 item 3.
+      //
+      // Offered only for refusals an alternative can actually answer. A cart
+      // over the ceiling has a cheaper option; an EXPIRED mandate does not —
+      // suggesting a different product to an agent whose authority has lapsed
+      // is noise, and worse, it implies the purchase is still possible.
+      const answerable =
+        verdict.reason_code === "MANDATE_CEILING_EXCEEDED" ||
+        verdict.reason_code === "MANDATE_CATEGORY_NOT_PERMITTED" ||
+        verdict.reason_code === "MANDATE_ITEM_COUNT_EXCEEDED";
+
+      // COMPUTED BEFORE THE AUDIT ROW IS WRITTEN, so the record of the
+      // refusal carries what was offered instead. It used to run after, which
+      // meant the alternatives existed for one HTTP response and never reached
+      // the trail: the log said "we blocked it" and could not say "and we told
+      // them what they could buy".
+      //
+      // GUARDED, because that reordering put a database query in front of
+      // invariant 3. Enrichment must never be able to suppress the log of a
+      // refusal, so a failure here yields no alternatives rather than an
+      // exception — the refusal is still recorded, just without them.
+      const alternatives = await (async () => {
+        if (!(answerable && request.mandate && lines.length > 0)) return [];
+        try {
+          return await alternativesFor(sql, row.merchant_id, {
+              mandate: request.mandate,
+              // The WHOLE ceiling, because these refusals mean the current cart
+              // is being abandoned rather than added to.
+              budgetMinor: request.mandate.constraints.max_amount.value,
+              nearCategories: cartCategories,
+              excludeIds: lines.map((l) => l.variant.variant_id),
+              // THE SAME FUNCTION THE GATE'S TOTALS COME FROM. Comparing the
+              // ceiling against a bare item price offered things this very gate
+              // then refused — on a real catalogue a 10000 paise item is a 15750
+              // paise cart once delivery and tax land. Reusing computeTotals is
+              // what stops the two drifting apart again; a parallel arithmetic
+              // here would be correct exactly until one of them changed.
+              totalFor: (itemPriceMinor) =>
+                totalOf(
+                  computeTotals([
+                    {
+                      variant: { ...lines[0]!.variant, price_minor: itemPriceMinor },
+                      quantity: 1,
+                      amount: itemPriceMinor,
+                    },
+                  ]),
+                ),
+          });
+        } catch (error) {
+          console.error(`[complete] alternatives lookup failed for ${sessionId}:`, error);
+          return [];
+        }
+      })();
+
       await record(sql, {
         session_id: sessionId,
         mandate_id: request.mandate?.mandate_id ?? null,
@@ -325,45 +379,16 @@ export async function completeSession(
             .filter((p) => p.reason_code)
             .map((p) => ({ check: p.check, reason_code: p.reason_code })),
           peers_passed: verdict.peers.filter((p) => !p.reason_code).map((p) => p.check),
+          // WHAT WAS OFFERED INSTEAD. A refusal an agent can act on and a dead
+          // end look identical in a log that records only the refusal, and the
+          // difference is the whole argument for this gate being useful rather
+          // than merely obstructive. An empty list is recorded too, and means
+          // something specific: either the reason code is one no alternative
+          // answers — an expired mandate is not fixed by a cheaper product —
+          // or nothing in the catalogue fits the mandate.
+          alternatives_offered: alternatives,
         },
       });
-      // AN IN-MANDATE ALTERNATIVE, WHERE ONE EXISTS. DESIGN.md §5 item 3.
-      //
-      // Offered only for refusals an alternative can actually answer. A cart
-      // over the ceiling has a cheaper option; an EXPIRED mandate does not —
-      // suggesting a different product to an agent whose authority has lapsed
-      // is noise, and worse, it implies the purchase is still possible.
-      const answerable =
-        verdict.reason_code === "MANDATE_CEILING_EXCEEDED" ||
-        verdict.reason_code === "MANDATE_CATEGORY_NOT_PERMITTED" ||
-        verdict.reason_code === "MANDATE_ITEM_COUNT_EXCEEDED";
-
-      const alternatives = answerable && request.mandate && lines.length > 0
-        ? await alternativesFor(sql, row.merchant_id, {
-            mandate: request.mandate,
-            // The WHOLE ceiling, because these refusals mean the current cart
-            // is being abandoned rather than added to.
-            budgetMinor: request.mandate.constraints.max_amount.value,
-            nearCategories: cartCategories,
-            excludeIds: lines.map((l) => l.variant.variant_id),
-            // THE SAME FUNCTION THE GATE'S TOTALS COME FROM. Comparing the
-            // ceiling against a bare item price offered things this very gate
-            // then refused — on a real catalogue a 10000 paise item is a 15750
-            // paise cart once delivery and tax land. Reusing computeTotals is
-            // what stops the two drifting apart again; a parallel arithmetic
-            // here would be correct exactly until one of them changed.
-            totalFor: (itemPriceMinor) =>
-              totalOf(
-                computeTotals([
-                  {
-                    variant: { ...lines[0]!.variant, price_minor: itemPriceMinor },
-                    quantity: 1,
-                    amount: itemPriceMinor,
-                  },
-                ]),
-              ),
-          })
-        : [];
 
       const current: CheckoutSession = { id: sessionId, ...session, status: row.status };
       return {

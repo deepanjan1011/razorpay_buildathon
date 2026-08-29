@@ -85,6 +85,53 @@ function Peers({ evidence }: { evidence: Record<string, unknown> }) {
   );
 }
 
+/**
+ * What the gate offered instead.
+ *
+ * The refusal was legible before this and the recovery was not: a dead end and
+ * a redirect looked identical on the page, because the log recorded only the
+ * refusal. Rendered only when something was offered — an absent list on an
+ * expired mandate is correct and has nothing to say.
+ */
+function Alternatives({ evidence }: { evidence: Record<string, unknown> }) {
+  const offered = (evidence["alternatives_offered"] ?? []) as Array<{
+    id: string;
+    title: string;
+    price_minor: number;
+  }>;
+  if (offered.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div className="eyebrow" style={{ marginBottom: 8 }}>
+        Offered instead — within the mandate
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {offered.map((a) => (
+          <span
+            key={a.id}
+            style={{
+              display: "inline-flex",
+              alignItems: "baseline",
+              gap: 8,
+              background: "var(--good-bg)",
+              color: "var(--good)",
+              border: "1px solid var(--line)",
+              padding: "6px 12px",
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            {a.title}
+            <b style={{ fontWeight: 700 }}>{money(a.price_minor)}</b>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Drift({ evidence }: { evidence: Record<string, unknown> }) {
   const drift = (evidence["drift"] ?? []) as Array<{ id: string; quoted_minor: number; live_minor: number }>;
   if (drift.length === 0) return null;
@@ -203,6 +250,7 @@ function Event({ row }: { row: AuditRow }) {
 
       <Drift evidence={evidence} />
       <Peers evidence={evidence} />
+      <Alternatives evidence={evidence} />
 
       {/* The time reads first and the provenance follows it, quieter. Dropping
           gate_version would be the wrong kind of tidying: rows written before
