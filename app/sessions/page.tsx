@@ -69,6 +69,21 @@ const FILTERS = {
 
 type FilterKey = keyof typeof FILTERS;
 
+/**
+ * Same treatment as the session page: fixed locale, zone pinned to IST, so the
+ * server render is deterministic. Seconds are dropped here — a list is scanned
+ * for "which run was this", and the ordered log on the session page is where
+ * within-the-minute ordering actually matters.
+ */
+const WHEN = new Intl.DateTimeFormat("en-IN", {
+  day: "2-digit",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+  timeZone: "Asia/Kolkata",
+});
+
 const PAGE = 15;
 
 const isFilter = (v: unknown): v is FilterKey =>
@@ -164,6 +179,7 @@ export default async function Sessions({
               <span style={{ flex: "0 0 170px" }}>Status</span>
               <span style={{ flex: 1 }}>Outcome</span>
               <span style={{ flex: "0 0 62px", textAlign: "right" }}>Events</span>
+              <span style={{ flex: "0 0 108px", textAlign: "right" }}>When</span>
             </div>
             {visible.map((r) => {
               const statusStyle = STATUS_STYLES[r.status] ?? STATUS_DEFAULT;
@@ -255,6 +271,17 @@ export default async function Sessions({
                 </span>
                 <span style={{ fontSize: 13, color: "var(--muted)", flex: "0 0 62px", whiteSpace: "nowrap", textAlign: "right" }}>
                   {r.events} events
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--muted)",
+                    flex: "0 0 108px",
+                    whiteSpace: "nowrap",
+                    textAlign: "right",
+                  }}
+                >
+                  {WHEN.format(new Date(r.updated_at))}
                 </span>
               </TransitionLink>
             );})}
