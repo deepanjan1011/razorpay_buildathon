@@ -16,6 +16,14 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { connect } from "../lib/db/sql.ts";
 
 const repo = process.cwd();
+
+/**
+ * Where the demo points. Same variable the MCP server reads, so the script and
+ * the tools it drives cannot end up talking to different servers — which is
+ * exactly what a second hardcoded localhost would cause the first time someone
+ * ran this against a deployment.
+ */
+const BASE = process.env["AGENTREADY_BASE_URL"] ?? "http://localhost:3000";
 const client = new Client({ name: "drift-drive", version: "0.0.1" });
 await client.connect(
   new StdioClientTransport({
@@ -47,7 +55,7 @@ const text = (r: unknown) => {
 };
 
 const mint = async (body: Record<string, unknown>) => {
-  const r = await fetch("http://localhost:3000/api/mandates", {
+  const r = await fetch(`${BASE}/api/mandates`, {
     method: "POST",
     headers: {
       "API-Version": "2026-04-17",
@@ -160,5 +168,5 @@ await sql.query(
   ["mer_live", pick.id, pick.price_minor],
 );
 console.log(`\n(price restored to ${pick.price_minor})`);
-console.log(`\n${"─".repeat(64)}\nOPEN THE AUDIT TRAIL:\n  http://localhost:3000/sessions/${s2.session_id}\n${"─".repeat(64)}`);
+console.log(`\n${"─".repeat(64)}\nOPEN THE AUDIT TRAIL:\n  ${BASE}/sessions/${s2.session_id}\n${"─".repeat(64)}`);
 await client.close();
