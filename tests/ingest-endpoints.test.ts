@@ -215,6 +215,67 @@ describe("POST /api/ingest — the trust boundary", () => {
   });
 });
 
+describe("POST /api/ingest — where an anonymous upload lands", () => {
+  /**
+   * The route has no authentication and the merchant id arrives in the form,
+   * so on a public URL anyone could post a sheet as `mer_live` and replace the
+   * catalogue the demo buys from. In production the submitted id is ignored.
+   *
+   * WHAT THIS DOES NOT COVER, stated rather than implied: the wiring from this
+   * decision into `ingestUpload`. Driving the route far enough to write a job
+   * needs a live DATABASE_URL, which these tests must not depend on — so this
+   * asserts the decision and not that the caller uses it. The caller is one
+   * line above the call, and it is read, not proven.
+   */
+  const req = (headers: Record<string, string> = {}) =>
+    new Request("https://merchant.example.com/api/ingest", { method: "POST", headers });
+
+  const withEnv = (env: Record<string, string | undefined>, fn: () => void) => {
+    const before = { ...process.env };
+    Object.assign(process.env, env);
+    for (const [k, v] of Object.entries(env)) if (v === undefined) delete process.env[k];
+    try {
+      fn();
+    } finally {
+      for (const k of Object.keys(process.env)) if (!(k in before)) delete process.env[k];
+      Object.assign(process.env, before);
+    }
+  };
+
+  test("outside production the submitted merchant is honoured", () => {
+    withEnv({ NODE_ENV: "test" }, () => {
+      assert.equal(uploadRoute.merchantFor(req(), "mer_live"), "mer_live");
+    });
+  });
+
+  test("in production every upload lands on the sandbox merchant", () => {
+    withEnv({ NODE_ENV: "production", INGEST_KEY: undefined }, () => {
+      assert.equal(uploadRoute.merchantFor(req(), "mer_live"), "mer_try");
+    });
+  });
+
+  test("the lock holds when no key is configured, including for the owner", () => {
+    // Unset INGEST_KEY must not mean "any key works" — the classic inversion.
+    withEnv({ NODE_ENV: "production", INGEST_KEY: undefined }, () => {
+      assert.equal(uploadRoute.merchantFor(req({ "x-ingest-key": "" }), "mer_live"), "mer_try");
+      assert.equal(uploadRoute.merchantFor(req({ "x-ingest-key": "guess" }), "mer_live"), "mer_try");
+    });
+  });
+
+  test("a wrong key is refused and the right key names its own merchant", () => {
+    withEnv({ NODE_ENV: "production", INGEST_KEY: "s3cret" }, () => {
+      assert.equal(uploadRoute.merchantFor(req({ "x-ingest-key": "wrong" }), "mer_live"), "mer_try");
+      assert.equal(uploadRoute.merchantFor(req({ "x-ingest-key": "s3cret" }), "mer_live"), "mer_live");
+    });
+  });
+
+  test("the sandbox merchant is configurable", () => {
+    withEnv({ NODE_ENV: "production", INGEST_SANDBOX_MERCHANT: "mer_demo_only" }, () => {
+      assert.equal(uploadRoute.merchantFor(req(), "mer_live"), "mer_demo_only");
+    });
+  });
+});
+
 describe("GET /api/ingest/{jobId}", () => {
   const get = (jobId: string) =>
     progressRoute.GET(new Request(`https://merchant.example.com/api/ingest/${jobId}`), {

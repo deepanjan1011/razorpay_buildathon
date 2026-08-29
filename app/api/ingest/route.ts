@@ -19,6 +19,35 @@ export const dynamic = "force-dynamic";
 /** Small-merchant sheets are small. A cap here is a trust boundary, not a tuning knob. */
 const MAX_BYTES = 10 * 1024 * 1024;
 
+/**
+ * WHERE AN ANONYMOUS UPLOAD IS ALLOWED TO LAND.
+ *
+ * This route has no authentication, which is fine on a laptop and is not fine
+ * on a public URL: the merchant id arrives in the form, so anyone could post a
+ * spreadsheet as `mer_live` and replace the catalogue the demo buys from —
+ * correctly, because replacing a catalogue is exactly what this endpoint does.
+ *
+ * So in production the submitted id is IGNORED and every upload lands on a
+ * sandbox merchant. The page keeps working and cannot reach the demo data.
+ *
+ * LOCKED BY DEFAULT rather than by configuration. A guard that has to be
+ * switched on is a guard that ships off, and the failure is silent until
+ * someone has already overwritten the catalogue.
+ *
+ * `INGEST_KEY` is the way back in for whoever owns the deployment: a request
+ * carrying it may name its own merchant, which is how the real catalogue gets
+ * seeded. Unset means nobody can, including the owner — the safe direction.
+ */
+export function merchantFor(request: Request, submitted: string): string {
+  // READ PER REQUEST, not once at import. A value captured at module load is a
+  // value a test cannot vary and a rotated key cannot change — the same reason
+  // the MCP server reads its token per call rather than at startup.
+  if (process.env.NODE_ENV !== "production") return submitted;
+  const key = process.env["INGEST_KEY"];
+  if (key && request.headers.get("x-ingest-key") === key) return submitted;
+  return process.env["INGEST_SANDBOX_MERCHANT"] ?? "mer_try";
+}
+
 export async function POST(request: Request): Promise<Response> {
   let form: FormData;
   try {
@@ -62,9 +91,14 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
+  // Validated first, then possibly replaced: a bad id is still a 400 rather
+  // than being quietly swallowed by the sandbox, so the form keeps telling the
+  // truth about what it accepts.
+  const landingMerchant = merchantFor(request, merchantId);
+
   try {
     const { progress, resumed } = await ingestUpload(await connect(), {
-      merchantId,
+      merchantId: landingMerchant,
       sourceFile: file.name,
       bytes: await file.arrayBuffer(),
     });
