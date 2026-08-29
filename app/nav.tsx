@@ -29,13 +29,34 @@ export default function Nav() {
   const path = usePathname();
 
   return (
-    <div className="animate-in" style={{ display: "flex", justifyContent: "center", padding: "24px 16px 12px" }}>
+    // STICKY, and the wrapper stays transparent on purpose: the pill already
+    // carries a translucent background and a blur, so content passing beneath
+    // it reads as passing beneath glass. A solid bar here would paint a strip
+    // across the page and undo that.
+    <div
+      className="animate-in"
+      style={{
+        display: "flex",
+        justifyContent: "center",
+        padding: "24px 16px 12px",
+        position: "sticky",
+        top: 0,
+        // Above cards and their hover transforms, below nothing else — there
+        // are no modals on this site to lose a stacking contest with.
+        zIndex: 50,
+      }}
+    >
       <nav
         style={{
           display: "flex",
           alignItems: "center",
           gap: 6,
-          background: "rgba(255, 255, 255, 0.75)",
+          // 0.75 was fine over a static page and failed the moment the nav
+          // became sticky: table rows passing underneath stayed legible
+          // through it, so the pill read as overlapping text rather than as
+          // glass. Opaque enough to sit on top of content, translucent enough
+          // that the blur still does something.
+          background: "rgba(255, 255, 255, 0.94)",
           backdropFilter: "blur(12px)",
           WebkitBackdropFilter: "blur(12px)",
           border: "1px solid rgba(232, 227, 220, 0.8)",
