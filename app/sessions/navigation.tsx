@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter } from "next/navigation.js";
 import { useTransition } from "react";
 
 export function TransitionLink({ 

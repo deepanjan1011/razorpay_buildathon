@@ -27,15 +27,7 @@
       }
     ],
     "esModuleInterop": true,
-    "resolveJsonModule": true,
-    // next/navigation type-resolves under `bundler` but not under `nodenext`,
-    // which the rest of this repo needs. Switching moduleResolution globally
-    // fixes that one error and breaks three in ajv's CJS interop — on the
-    // schema-validation path, which is not where to trade correctness for a
-    // client component. So the single module is mapped, not the whole project.
-    "paths": {
-      "next/navigation": ["./node_modules/next/navigation.d.ts"]
-    }
+    "resolveJsonModule": true
   },
   "include": [
     "lib",
