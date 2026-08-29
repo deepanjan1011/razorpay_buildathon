@@ -137,6 +137,21 @@ export async function ingestUpload(
 
   if (before.status !== "complete") {
     startRun(sql, id, input.merchantId, input.extract);
+  } else {
+    // A COMPLETE JOB STILL PUBLISHES. The job record lives in Postgres and the
+    // feed lives on the serving host's disk, so those two can disagree — and
+    // they did, the first time this was deployed: the database already held a
+    // completed job from a laptop, the new host skipped the run because there
+    // was nothing left to extract, and served 404 for a feed whose products
+    // were sitting in the same database it was reading.
+    //
+    // Publishing is idempotent (full replacement from the assembled products),
+    // so doing it here costs one read and no API calls, and it makes "upload
+    // the sheet again" mean what a merchant assumes: the feed exists
+    // afterwards. Awaited rather than backgrounded — there is no extraction to
+    // wait for, and a caller that gets 202 and then finds no feed is the bug
+    // this replaces.
+    await publishFeed(sql, id, input.merchantId);
   }
 
   return { progress: await getProgress(sql, id), resumed };
