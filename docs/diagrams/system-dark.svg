@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" role="img"
+           aria-label="A merchant uploads a spreadsheet to ingest, which produces an ACP feed and a buyable catalogue. An AI agent discovers from the feed and drives checkout. A buyer's human signs a mandate that the gate checks. Razorpay issues a payment link a human pays, and a webhook returns. Every decision is written to an append-only audit log.">
+        <style>
+    svg { color: #f3eee5; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .box { fill: #1f1c17; stroke: currentColor; stroke-width: 1.5; }
+    .lane { fill: #1a1712; stroke: #353027; stroke-width: 1; }
+    .soft { fill: #262119; stroke: #353027; stroke-width: 1.5; }
+    .t { font-size: 13px; font-weight: 600; fill: currentColor; }
+    .s { font-size: 10.5px; fill: #a89d8c; }
+    .m { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 10.5px; fill: #a89d8c; }
+    .lanelbl { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px;
+                letter-spacing: .16em; fill: #7c7264; text-transform: uppercase; }
+    .e { stroke: currentColor; stroke-width: 1.5; fill: none; }
+    .ea { stroke: #ff7a45; stroke-width: 2; fill: none; }
+    .eg { stroke: #4fb383; stroke-width: 1.5; fill: none; }
+    .eb { stroke: #ff6f52; stroke-width: 1.5; fill: none; }
+    .tag { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px; letter-spacing: .04em; }
+</style><rect x="0" y="0" width="1000" height="560" fill="#1f1c17"/><defs>
+          <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="m1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ff7a45"/></marker>
+          <marker id="m1d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a89d8c"/></marker>
+        </defs>
+
+        <!-- lanes -->
+        <rect class="lane" x="10" y="26" width="980" height="104" rx="3"/>
+        <text class="lanelbl" x="24" y="46">People</text>
+        <rect class="lane" x="10" y="186" width="980" height="126" rx="3"/>
+        <text class="lanelbl" x="24" y="206">The system</text>
+        <rect class="lane" x="10" y="360" width="980" height="86" rx="3"/>
+        <text class="lanelbl" x="24" y="380">Buyer side</text>
+
+        <!-- people -->
+        <rect class="box" x="60" y="58" width="170" height="56" rx="3"/>
+        <text class="t" x="145" y="82" text-anchor="middle">Merchant</text>
+        <text class="s" x="145" y="99" text-anchor="middle">uploads a spreadsheet</text>
+
+        <rect class="box" x="540" y="58" width="180" height="56" rx="3"/>
+        <text class="t" x="630" y="82" text-anchor="middle">Buyer</text>
+        <text class="s" x="630" y="99" text-anchor="middle">signs a mandate</text>
+
+        <rect class="box" x="800" y="58" width="160" height="56" rx="3"/>
+        <text class="t" x="880" y="82" text-anchor="middle">Payer</text>
+        <text class="s" x="880" y="99" text-anchor="middle">opens the link</text>
+
+        <!-- system stages -->
+        <rect class="box" x="60" y="212" width="170" height="74" rx="3"/>
+        <text class="t" x="145" y="240" text-anchor="middle">Ingest</text>
+        <text class="s" x="145" y="257" text-anchor="middle">parse · normalise</text>
+        <text class="s" x="145" y="272" text-anchor="middle">flag what it can't read</text>
+
+        <rect class="box" x="285" y="212" width="180" height="74" rx="3"/>
+        <text class="t" x="375" y="240" text-anchor="middle">Feed + catalogue</text>
+        <text class="s" x="375" y="257" text-anchor="middle">ACP product feed</text>
+        <text class="s" x="375" y="272" text-anchor="middle">and what checkout prices</text>
+
+        <rect class="box" x="520" y="212" width="200" height="74" rx="3" stroke="#ff7a45"/>
+        <text class="t" x="620" y="240" text-anchor="middle">Checkout + gate</text>
+        <text class="s" x="620" y="257" text-anchor="middle">authoritative pricing</text>
+        <text class="s" x="620" y="272" text-anchor="middle">mandate verification</text>
+
+        <rect class="box" x="775" y="212" width="185" height="74" rx="3"/>
+        <text class="t" x="867" y="240" text-anchor="middle">Razorpay</text>
+        <text class="s" x="867" y="257" text-anchor="middle">payment link, test mode</text>
+        <text class="s" x="867" y="272" text-anchor="middle">webhook back</text>
+
+        <!-- agent -->
+        <rect class="box" x="285" y="384" width="435" height="52" rx="3"/>
+        <text class="t" x="502" y="405" text-anchor="middle">AI agent — over MCP</text>
+        <text class="m" x="502" y="423" text-anchor="middle">discover_products · create_checkout_session · complete_checkout</text>
+
+        <!-- audit -->
+        <rect class="soft" x="60" y="482" width="900" height="52" rx="3"/>
+        <text class="t" x="510" y="503" text-anchor="middle">Append-only audit log</text>
+        <text class="s" x="510" y="521" text-anchor="middle">every decision · machine reason code · human sentence · ruleset version</text>
+
+        <!-- edges -->
+        <path class="e" d="M145,114 L145,208" marker-end="url(#m1)"/>
+        <path class="e" d="M230,249 L281,249" marker-end="url(#m1)"/>
+        <path class="ea" d="M630,114 L630,208" marker-end="url(#m1a)"/>
+        <text class="tag" x="640" y="166" fill="#ff7a45">how much · what · how long</text>
+
+        <path class="e" d="M375,380 L375,290" marker-end="url(#m1)"/>
+        <text class="m" x="385" y="340">discover</text>
+        <path class="e" d="M620,380 L620,290" marker-end="url(#m1)"/>
+        <text class="m" x="608" y="340" text-anchor="end">price · complete</text>
+
+        <path class="e" d="M720,238 L771,238" marker-end="url(#m1)"/>
+        <text class="m" x="745" y="228" text-anchor="middle">create</text>
+        <path class="e" d="M867,208 L867,118" marker-end="url(#m1)" stroke-dasharray="5 4"/>
+        <text class="m" x="877" y="166">link</text>
+        <path class="e" d="M775,268 L724,268" marker-end="url(#m1)" stroke-dasharray="5 4"/>
+        <text class="m" x="748" y="288" text-anchor="middle">webhook</text>
+
+        <path class="e" d="M672,286 L672,358 L806,358 L806,478" marker-end="url(#m1d)" stroke="#a89d8c"/>
+        <text class="m" x="816" y="424">allowed · refused</text>
+      </svg>

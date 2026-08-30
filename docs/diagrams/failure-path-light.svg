@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="344" viewBox="0 0 900 344" role="img"
+           aria-label="An agent reaches the mandate gate. Allowed, it receives a payment link that a human pays. Refused, it receives a reason plus affordable alternatives and loops back to build a new cart.">
+        <style>
+    svg { color: #1a1815; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .box { fill: #ffffff; stroke: currentColor; stroke-width: 1.5; }
+    .lane { fill: #faf7f2; stroke: #e8e3dc; stroke-width: 1; }
+    .soft { fill: #f2ede5; stroke: #e8e3dc; stroke-width: 1.5; }
+    .t { font-size: 13px; font-weight: 600; fill: currentColor; }
+    .s { font-size: 10.5px; fill: #736b5f; }
+    .m { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 10.5px; fill: #736b5f; }
+    .lanelbl { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px;
+                letter-spacing: .16em; fill: #a69e90; text-transform: uppercase; }
+    .e { stroke: currentColor; stroke-width: 1.5; fill: none; }
+    .ea { stroke: #eb5e28; stroke-width: 2; fill: none; }
+    .eg { stroke: #24824d; stroke-width: 1.5; fill: none; }
+    .eb { stroke: #d13a1e; stroke-width: 1.5; fill: none; }
+    .tag { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px; letter-spacing: .04em; }
+</style><rect x="0" y="0" width="900" height="344" fill="#ffffff"/><defs>
+          <marker id="m4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="m4g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#24824d"/></marker>
+          <marker id="m4b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d13a1e"/></marker>
+        </defs>
+
+        <rect class="box" x="14" y="132" width="140" height="62" rx="3"/>
+        <text class="t" x="84" y="156" text-anchor="middle">AI agent</text>
+        <text class="s" x="84" y="174" text-anchor="middle">over MCP</text>
+
+        <path class="e" d="M154,163 L192,163" marker-end="url(#m4)"/>
+
+        <rect class="box" x="196" y="132" width="176" height="62" rx="3"/>
+        <text class="t" x="284" y="152" text-anchor="middle">Priced cart</text>
+        <text class="s" x="284" y="170" text-anchor="middle">our number, not theirs</text>
+        <text class="m" x="284" y="186" text-anchor="middle">+ delivery + tax</text>
+
+        <path class="e" d="M372,163 L410,163" marker-end="url(#m4)"/>
+
+        <rect class="box" x="414" y="132" width="150" height="62" rx="3" stroke="#eb5e28"/>
+        <text class="t" x="489" y="156" text-anchor="middle">Mandate gate</text>
+        <text class="s" x="489" y="174" text-anchor="middle">five checks</text>
+
+        <path class="eg" d="M564,148 L600,148 L600,76 L634,76" marker-end="url(#m4g)"/>
+        <text class="tag" x="606" y="112" fill="#24824d">passes</text>
+        <rect class="box" x="638" y="46" width="176" height="62" rx="3" stroke="#24824d"/>
+        <text class="t" x="726" y="70" text-anchor="middle">Payment link</text>
+        <text class="s" x="726" y="88" text-anchor="middle">a person opens it</text>
+        <text class="m" x="726" y="128" text-anchor="middle">webhook → completed</text>
+
+        <path class="eb" d="M564,178 L600,178 L600,248 L634,248" marker-end="url(#m4b)"/>
+        <text class="tag" x="606" y="216" fill="#d13a1e">refused</text>
+        <rect class="box" x="638" y="218" width="176" height="76" rx="3" stroke="#d13a1e"/>
+        <text class="t" x="726" y="242" text-anchor="middle" fill="#d13a1e">Reason + alternatives</text>
+        <text class="s" x="726" y="260" text-anchor="middle">both numbers, in rupees</text>
+        <text class="s" x="726" y="276" text-anchor="middle">what it can still afford</text>
+
+        <path class="e" d="M726,294 L726,322 L84,322 L84,196" marker-end="url(#m4)" stroke-dasharray="5 4"/>
+        <text class="m" x="405" y="316" text-anchor="middle">takes one · builds a new cart</text>
+
+        <text class="m" x="14" y="36">The agent never receives a charge — only a URL.</text>
+      </svg>

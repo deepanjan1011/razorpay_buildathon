@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300" role="img"
+           aria-label="Browsing the product feed is unauthenticated by design. Creating sessions and completing them require an agent credential, and completing additionally requires a signed mandate. The webhook verifies a signature over raw bytes.">
+        <style>
+    svg { color: #1a1815; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .box { fill: #ffffff; stroke: currentColor; stroke-width: 1.5; }
+    .lane { fill: #faf7f2; stroke: #e8e3dc; stroke-width: 1; }
+    .soft { fill: #f2ede5; stroke: #e8e3dc; stroke-width: 1.5; }
+    .t { font-size: 13px; font-weight: 600; fill: currentColor; }
+    .s { font-size: 10.5px; fill: #736b5f; }
+    .m { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 10.5px; fill: #736b5f; }
+    .lanelbl { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px;
+                letter-spacing: .16em; fill: #a69e90; text-transform: uppercase; }
+    .e { stroke: currentColor; stroke-width: 1.5; fill: none; }
+    .ea { stroke: #eb5e28; stroke-width: 2; fill: none; }
+    .eg { stroke: #24824d; stroke-width: 1.5; fill: none; }
+    .eb { stroke: #d13a1e; stroke-width: 1.5; fill: none; }
+    .tag { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px; letter-spacing: .04em; }
+</style><rect x="0" y="0" width="900" height="300" fill="#ffffff"/><defs>
+          <marker id="m5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        </defs>
+
+        <rect class="lane" x="10" y="24" width="880" height="82" rx="3"/>
+        <text class="lanelbl" x="26" y="44">Open — on purpose</text>
+        <rect class="box" x="30" y="52" width="200" height="42" rx="3"/>
+        <text class="m" x="130" y="78" text-anchor="middle" fill="currentColor">GET /feeds/{id}/products</text>
+        <text class="s" x="250" y="78">A credential wall in front of a price list makes the merchant invisible.</text>
+
+        <rect class="lane" x="10" y="120" width="880" height="106" rx="3"/>
+        <text class="lanelbl" x="26" y="140">Credentialed</text>
+        <rect class="box" x="30" y="150" width="200" height="40" rx="3"/>
+        <text class="m" x="130" y="175" text-anchor="middle" fill="currentColor">POST /checkout_sessions</text>
+        <rect class="box" x="30" y="196" width="200" height="22" rx="3" stroke="#eb5e28"/>
+        <text class="m" x="130" y="212" text-anchor="middle" fill="#eb5e28">POST /complete</text>
+        <text class="s" x="250" y="172">Bearer token, stored as a hash, compared in constant time.</text>
+        <text class="s" x="250" y="190">The merchant comes from the credential — never from a header.</text>
+        <text class="s" x="250" y="212" fill="#eb5e28">Complete also needs a signed mandate. No mandate, no payment call.</text>
+
+        <rect class="lane" x="10" y="240" width="880" height="52" rx="3"/>
+        <text class="lanelbl" x="26" y="260">The one door strangers can knock on</text>
+        <rect class="box" x="30" y="252" width="200" height="32" rx="3"/>
+        <text class="m" x="130" y="272" text-anchor="middle" fill="currentColor">POST /webhooks/razorpay</text>
+        <text class="s" x="250" y="272">HMAC over the raw bytes, checked before the body is parsed. Unset secret refuses everything.</text>
+      </svg>

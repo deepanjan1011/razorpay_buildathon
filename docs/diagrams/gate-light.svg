@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="400" viewBox="0 0 920 400" role="img"
+           aria-label="A mandate and priced cart hit preconditions. A failed signature stops evaluation entirely. Otherwise all five peer checks are evaluated together; the agent receives one reason code while the audit log receives every check that passed and failed.">
+        <style>
+    svg { color: #1a1815; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .box { fill: #ffffff; stroke: currentColor; stroke-width: 1.5; }
+    .lane { fill: #faf7f2; stroke: #e8e3dc; stroke-width: 1; }
+    .soft { fill: #f2ede5; stroke: #e8e3dc; stroke-width: 1.5; }
+    .t { font-size: 13px; font-weight: 600; fill: currentColor; }
+    .s { font-size: 10.5px; fill: #736b5f; }
+    .m { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 10.5px; fill: #736b5f; }
+    .lanelbl { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px;
+                letter-spacing: .16em; fill: #a69e90; text-transform: uppercase; }
+    .e { stroke: currentColor; stroke-width: 1.5; fill: none; }
+    .ea { stroke: #eb5e28; stroke-width: 2; fill: none; }
+    .eg { stroke: #24824d; stroke-width: 1.5; fill: none; }
+    .eb { stroke: #d13a1e; stroke-width: 1.5; fill: none; }
+    .tag { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px; letter-spacing: .04em; }
+</style><rect x="0" y="0" width="920" height="400" fill="#ffffff"/><defs>
+          <marker id="m3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="m3b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d13a1e"/></marker>
+        </defs>
+
+        <rect class="box" x="14" y="158" width="158" height="62" rx="3"/>
+        <text class="t" x="93" y="182" text-anchor="middle">Mandate + cart</text>
+        <text class="s" x="93" y="200" text-anchor="middle">priced by us, not the agent</text>
+
+        <path class="e" d="M172,189 L206,189" marker-end="url(#m3)"/>
+
+        <rect class="box" x="210" y="150" width="186" height="80" rx="3"/>
+        <text class="t" x="303" y="176" text-anchor="middle">Precondition</text>
+        <text class="m" x="303" y="196" text-anchor="middle">signature verifies?</text>
+        <text class="s" x="303" y="214" text-anchor="middle">then window · currency</text>
+
+        <path class="eb" d="M303,230 L303,290" marker-end="url(#m3b)"/>
+        <text class="tag" x="313" y="266" fill="#d13a1e">no</text>
+
+        <rect class="box" x="192" y="294" width="222" height="62" rx="3" stroke="#d13a1e"/>
+        <text class="t" x="303" y="318" text-anchor="middle" fill="#d13a1e">Stop. Nothing else is judged.</text>
+        <text class="s" x="303" y="336" text-anchor="middle">unauthenticated bytes aren't evidence</text>
+
+        <path class="e" d="M396,189 L436,189" marker-end="url(#m3)"/>
+        <text class="tag" x="416" y="178" text-anchor="middle">yes</text>
+
+        <rect class="soft" x="440" y="40" width="212" height="300" rx="3"/>
+        <text class="tag" x="546" y="64" text-anchor="middle" fill="#eb5e28">ALL FIVE, EVERY TIME</text>
+
+        <rect class="box" x="458" y="80" width="176" height="34" rx="3"/>
+        <text class="m" x="546" y="101" text-anchor="middle" fill="currentColor">validity_window</text>
+        <rect class="box" x="458" y="126" width="176" height="34" rx="3"/>
+        <text class="m" x="546" y="147" text-anchor="middle" fill="currentColor">single_use</text>
+        <rect class="box" x="458" y="172" width="176" height="34" rx="3" stroke="#d13a1e"/>
+        <text class="m" x="546" y="193" text-anchor="middle" fill="#d13a1e">ceiling</text>
+        <rect class="box" x="458" y="218" width="176" height="34" rx="3"/>
+        <text class="m" x="546" y="239" text-anchor="middle" fill="currentColor">category</text>
+        <rect class="box" x="458" y="264" width="176" height="34" rx="3"/>
+        <text class="m" x="546" y="285" text-anchor="middle" fill="currentColor">item_count</text>
+        <text class="s" x="546" y="322" text-anchor="middle">none short-circuits another</text>
+
+        <path class="e" d="M652,140 L692,140 L692,116 L716,116" marker-end="url(#m3)"/>
+        <rect class="box" x="720" y="86" width="170" height="62" rx="3"/>
+        <text class="t" x="805" y="110" text-anchor="middle">The agent hears</text>
+        <text class="s" x="805" y="128" text-anchor="middle">one reason code</text>
+
+        <path class="e" d="M652,240 L692,240 L692,264 L716,264" marker-end="url(#m3)"/>
+        <rect class="box" x="720" y="234" width="170" height="78" rx="3"/>
+        <text class="t" x="805" y="258" text-anchor="middle">The record keeps</text>
+        <text class="s" x="805" y="276" text-anchor="middle">all five, passed and failed</text>
+        <text class="s" x="805" y="292" text-anchor="middle">+ which ruleset judged it</text>
+      </svg>

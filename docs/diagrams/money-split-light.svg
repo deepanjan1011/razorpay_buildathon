@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="268" viewBox="0 0 900 268" role="img"
+           aria-label="A spreadsheet is parsed deterministically. Titles and categories go up to one LLM call; prices, stock and currency bypass the model entirely on a direct line to assembly.">
+        <style>
+    svg { color: #1a1815; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .box { fill: #ffffff; stroke: currentColor; stroke-width: 1.5; }
+    .lane { fill: #faf7f2; stroke: #e8e3dc; stroke-width: 1; }
+    .soft { fill: #f2ede5; stroke: #e8e3dc; stroke-width: 1.5; }
+    .t { font-size: 13px; font-weight: 600; fill: currentColor; }
+    .s { font-size: 10.5px; fill: #736b5f; }
+    .m { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 10.5px; fill: #736b5f; }
+    .lanelbl { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px;
+                letter-spacing: .16em; fill: #a69e90; text-transform: uppercase; }
+    .e { stroke: currentColor; stroke-width: 1.5; fill: none; }
+    .ea { stroke: #eb5e28; stroke-width: 2; fill: none; }
+    .eg { stroke: #24824d; stroke-width: 1.5; fill: none; }
+    .eb { stroke: #d13a1e; stroke-width: 1.5; fill: none; }
+    .tag { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px; letter-spacing: .04em; }
+</style><rect x="0" y="0" width="900" height="268" fill="#ffffff"/><defs>
+          <marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <marker id="m2a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#eb5e28"/></marker>
+        </defs>
+
+        <rect class="box" x="16" y="140" width="132" height="62" rx="3"/>
+        <text class="t" x="82" y="166" text-anchor="middle">Spreadsheet</text>
+        <text class="s" x="82" y="184" text-anchor="middle">78 rows</text>
+
+        <path class="e" d="M148,171 L196,171" marker-end="url(#m2)"/>
+
+        <rect class="box" x="200" y="140" width="168" height="62" rx="3"/>
+        <text class="t" x="284" y="166" text-anchor="middle">Deterministic parse</text>
+        <text class="s" x="284" y="184" text-anchor="middle">plain code, no model</text>
+
+        <path class="e" d="M368,158 L398,158 L398,64 L426,64" marker-end="url(#m2)"/>
+        <text class="m" x="404" y="112">titles · categories</text>
+
+        <rect class="box" x="430" y="34" width="204" height="62" rx="3"/>
+        <text class="t" x="532" y="60" text-anchor="middle">One LLM call</text>
+        <text class="s" x="532" y="78" text-anchor="middle">names, variants, category</text>
+
+        <path class="e" d="M634,64 L662,64 L662,158 L686,158" marker-end="url(#m2)"/>
+
+        <path class="ea" d="M368,190 L686,190" marker-end="url(#m2a)"/>
+        <text class="tag" x="527" y="212" text-anchor="middle" fill="#eb5e28">prices · stock · currency — never shown to the model</text>
+
+        <rect class="box" x="690" y="140" width="180" height="62" rx="3"/>
+        <text class="t" x="780" y="166" text-anchor="middle">Assemble</text>
+        <text class="s" x="780" y="184" text-anchor="middle">feed + catalogue</text>
+
+        <text class="m" x="16" y="242">Every field keeps the row it came from.</text>
+      </svg>

@@ -1,19 +1,91 @@
 # agentready
 
-Makes a small merchant **without a commerce stack** transactable by AI buyers.
-Their catalogue is a spreadsheet, their storefront is Instagram, their payments
-are a Razorpay link.
+**A merchant whose entire catalogue is a spreadsheet, made transactable by AI
+buyers — with a gate that refuses a charge nobody authorised, and says why.**
 
 Razorpay Buildathon, Track 1 (merchant side).
+Live: **https://razorpaybuildathon-production.up.railway.app**
 
 ---
 
-## The boundary
+## The problem
+
+A snacks shop in Chennai sells through WhatsApp, Instagram, and a Razorpay
+link. Their inventory system is an `.xlsx` file — merged cells, prices written
+eight different ways, notes above the header.
+
+They cannot sell to an AI agent. Every agent-commerce standard assumes a
+website, a product feed, and a platform to host them.
+
+### Who this is for — and who it is not
 
 Merchants already on a commerce platform are solved — Shopify merchants get
 agent-readiness free via UCP and ACP, including Catalog APIs and MCP servers.
 This project does not compete there. It targets merchants on **no platform at
 all**, which is most of them.
+
+Any feature that only makes sense for a merchant who already has a website is
+rejected in review. That drift rebuilds Shopify's product with none of
+Shopify's resources.
+
+---
+
+## What it does
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/system-dark.svg">
+  <img alt="Four stages: a merchant uploads a spreadsheet to ingest, which writes an ACP feed and a buyable catalogue. An AI agent discovers and drives checkout from below. A buyer signs a mandate that the gate checks. Razorpay issues a payment link a human opens. Every decision lands in an append-only audit log." src="docs/diagrams/system-light.svg">
+</picture>
+
+A spreadsheet goes in on the left. An agent works from underneath. A person
+signs the spending authority at the top — that is the orange edge, and it is
+the only thing that gives an agent permission to spend. Everything any of them
+did ends up on the record at the bottom.
+
+| | |
+|---|---|
+| **Ingest** | A messy spreadsheet → normalized products, every field tracing to its source row |
+| **Feed** | An ACP product feed agents can read |
+| **Checkout** | ACP checkout sessions, authoritative pricing, Razorpay test-mode payment links |
+| **Mandates** | Signed authority: ceiling, category, item count, validity window, single-use |
+| **Audit** | Append-only log of every decision, with a machine reason code and a human string |
+| **MCP** | Three tools — discover, create session, complete |
+| **Dashboard** | Four pages: the transformation, the products held back with the reason and the sheet row, and every decision a checkout made |
+
+---
+
+## The model reads meaning. Ordinary code reads money.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/money-split-dark.svg">
+  <img alt="A spreadsheet is parsed deterministically. Titles and categories go up to one LLM call; prices, stock and currency bypass the model on a direct line to assembly." src="docs/diagrams/money-split-light.svg">
+</picture>
+
+Prices, stock and currency are parsed before the model runs, and it is never
+shown them. Invariant 1 is therefore structural rather than a promise: the model
+cannot influence an amount it is never asked to emit. `₹ 65/Kg` became 6500
+paise with no model involved.
+
+Which is also why the alternative finder is not a recommender — a ranking model
+there is *a model adjacent to the charge decision*.
+
+---
+
+## No payment call executes without a valid mandate
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/gate-dark.svg">
+  <img alt="A mandate and priced cart hit preconditions. A failed signature stops evaluation entirely. Otherwise all five peer checks are evaluated together; the agent receives one reason code while the audit log receives every check that passed and failed." src="docs/diagrams/gate-light.svg">
+</picture>
+
+The signature is a **precondition**, not a sixth check. If it does not verify,
+the mandate's contents are unauthenticated bytes — computing a ceiling
+comparison from them is not merely impolite, it is meaningless, and recording
+that it "passed" would be a lie about evidence we do not have.
+
+If it verifies, all five checks run, every time, none short-circuiting another.
+Then two audiences are told two different amounts — see
+[the gate refuses one thing and records everything](#the-gate-refuses-one-thing-and-records-everything).
 
 ---
 
@@ -22,6 +94,12 @@ all**, which is most of them.
 ```bash
 npm run dev          # terminal 1
 npm run demo         # terminal 2
+```
+
+Or against the deployed site, with no local server at all:
+
+```bash
+AGENTREADY_BASE_URL=https://razorpaybuildathon-production.up.railway.app npm run demo
 ```
 
 An agent discovers murukku from a real Chennai snacks catalogue, buys one, then
@@ -41,19 +119,22 @@ it, and **the four checks that passed beside the one that failed**.
 
 ---
 
-## What it does
+## What happens after "no"
 
-| | |
-|---|---|
-| **Ingest** | A messy spreadsheet → normalized products, every field tracing to its source row |
-| **Feed** | An ACP product feed agents can read |
-| **Checkout** | ACP checkout sessions, authoritative pricing, Razorpay test-mode payment links |
-| **Mandates** | Signed authority: ceiling, category, item count, validity window, single-use |
-| **Audit** | Append-only log of every decision, with a machine reason code and a human string |
-| **MCP** | Three tools — discover, create session, complete |
-| **Dashboard** | Four pages: the transformation, the products held back with the reason and the sheet row, and every decision a checkout made |
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/failure-path-dark.svg">
+  <img alt="An agent reaches the mandate gate. Allowed, it receives a payment link a human pays. Refused, it receives a reason plus affordable alternatives and loops back to build a new cart." src="docs/diagrams/failure-path-light.svg">
+</picture>
 
-### Normalization accuracy
+The dashed edge is the failure path. Without it a refusal is a dead end and the
+merchant loses a sale they could have made. Alternatives are priced through the
+same totals function the gate uses, so nothing offered is something the gate
+would then refuse — an earlier version compared bare item prices against the
+ceiling and offered carts that failed once tax landed.
+
+---
+
+## Normalization accuracy
 
 **100% (470/470 field observations) on 78 products transcribed from one Chennai
 snacks seller's public IndiaMART listing, with labels hand-written by us.**
